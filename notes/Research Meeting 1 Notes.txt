@@ -1,0 +1,17 @@
+Python Script
+ 
+Don'tuse data class
+
+Include in __init__
+
+Line 216 dont include so many options
+
+Don't have so many options when looking for data in the json file
+
+Don't use import typing and its features
+
+Line 72 comments should be like standard comments and not in line (comes from import typing)
+
+Removing what results from import typing
+
+if name = main
