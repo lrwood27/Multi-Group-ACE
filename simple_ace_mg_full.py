@@ -177,8 +177,8 @@ class MGData:
     sigf: List[float]  # fission
     nu: List[float]
     chi: List[float]
-    sigs: List[float]  # scatter matrix, length NG*NG, row-major
-    sig1: List[float]  # P1 scatter, length NG*NG (or all zeros)
+    sigs: List[float]  # scatter matrix, row-major, row=to, col=from
+    sig1: List[float]  # P1 scatter, row-major, row=to, col=from
     nbins: int         # angular bins if anisotropic
     comment_short: str
     date: str
@@ -338,7 +338,8 @@ def load_from_json(path: str) -> Tuple[MGData, str]:
             f = sigf[g]
             s = 0.0
             for j in range(NG):
-                s += sigs[g * NG + j]
+                # Internal matrix convention: row=to, col=from.
+                s += sigs[j * NG + g]
             sigt.append(c + f + s)
 
     nbins = int(cfg.get("nbins", 1000))
@@ -448,11 +449,13 @@ def build_ace(mg: MGData) -> Tuple[List[int], List[int], List[float]]:
         put(jxs[5] + k, chi[k])
         put(jxs[6] + k, sigc[k])
 
+    # Internal matrix convention is row=to, col=from.
+    # ACE scatter block is row=from, col=to, so transpose at the boundary.
     put(jxs[13], jxs[13] + 1)
     for i in range(NG):
         for j in range(NG):
             idx = jxs[13] + 1 + i * NG + j
-            put(idx, sigs[i * NG + j])
+            put(idx, sigs[j * NG + i])
 
     if ISOTROPIC:
         put(jxs[16], 0.0)
@@ -467,7 +470,7 @@ def build_ace(mg: MGData) -> Tuple[List[int], List[int], List[float]]:
         LOFF = 1
         for i in range(NG):
             for j in range(NG):
-                k = i * NG + j
+                k = j * NG + i
                 if sigs[k] == 0.0:
                     put(NEXT16, -1.0)
                     NEXT16 += 1
@@ -582,9 +585,10 @@ def read_mg_ace(ace_file: str) -> Tuple[MGData, List[int], List[int], List[float
 
     p0_start = int(xss[jxs[13]])
     sigs: List[float] = []
-    for i in range(NG):
-        for j in range(NG):
-            sigs.append(xss[p0_start + i * NG + j])
+    # Convert ACE layout (row=from, col=to) to internal (row=to, col=from).
+    for to_g in range(NG):
+        for from_g in range(NG):
+            sigs.append(xss[p0_start + from_g * NG + to_g])
 
     NBINS = nxs[3] - 1 if nxs[3] > 0 else 0
     sig1 = [0.0] * (NG * NG)
@@ -619,6 +623,12 @@ def read_mg_ace(ace_file: str) -> Tuple[MGData, List[int], List[int], List[float
 # HDF5 mgxs.h5 writer (OpenMC-style, isotropic)
 # -----------------------------------------------------------------------------
 
+def _set_fixed_ascii_attr(attrs, key, value):
+    # OpenSn expects fixed-length C-string attributes in some readers.
+    encoded = value.encode("ascii")
+    attrs.create(key, encoded, dtype=f"S{len(encoded)}")
+
+
 def write_mgxs_hdf5_isotropic(
     mg: MGData,
     h5_path: str,
@@ -651,7 +661,7 @@ def write_mgxs_hdf5_isotropic(
 
     import h5py  # local
     with h5py.File(h5_path, "w") as f:
-        f.attrs["filetype"] = "mgxs"
+        _set_fixed_ascii_attr(f.attrs, "filetype", "mgxs")
         f.attrs["version"] = [1, 0]
         f.attrs["energy_groups"] = NG
         f.attrs["delayed_groups"] = 0
@@ -661,10 +671,10 @@ def write_mgxs_hdf5_isotropic(
         g_lib = f.create_group(name)
         g_lib.attrs["atomic_weight_ratio"] = mg.awr
         g_lib.attrs["fissionable"] = bool(fissionable)
-        g_lib.attrs["representation"] = "isotropic"
-        g_lib.attrs["scatter_format"] = "legendre"
+        _set_fixed_ascii_attr(g_lib.attrs, "representation", "isotropic")
+        _set_fixed_ascii_attr(g_lib.attrs, "scatter_format", "legendre")
         g_lib.attrs["order"] = 0
-        g_lib.attrs["scatter_shape"] = "[Order][G][G']"
+        _set_fixed_ascii_attr(g_lib.attrs, "scatter_shape", "[G][G'][Order]")
 
         g_kTs = g_lib.create_group("kTs")
         g_kTs.create_dataset(temp_group_name, data=kT_eV)
@@ -765,7 +775,7 @@ def write_problem_mgxs_library(
 
     with h5py.File(h5_path, "w") as f:
         # File-level attrs (shared)
-        f.attrs["filetype"] = "mgxs"
+        _set_fixed_ascii_attr(f.attrs, "filetype", "mgxs")
         f.attrs["version"] = [1, 0]
         f.attrs["energy_groups"] = NG
         f.attrs["delayed_groups"] = 0
@@ -780,10 +790,10 @@ def write_problem_mgxs_library(
             g_lib = f.create_group(name)
             g_lib.attrs["atomic_weight_ratio"] = mg.awr
             g_lib.attrs["fissionable"] = bool(fissionable)
-            g_lib.attrs["representation"] = "isotropic"
-            g_lib.attrs["scatter_format"] = "legendre"
+            _set_fixed_ascii_attr(g_lib.attrs, "representation", "isotropic")
+            _set_fixed_ascii_attr(g_lib.attrs, "scatter_format", "legendre")
             g_lib.attrs["order"] = 0
-            g_lib.attrs["scatter_shape"] = "[Order][G][G']"
+            _set_fixed_ascii_attr(g_lib.attrs, "scatter_shape", "[G][G'][Order]")
 
             # Temperature info per nuclide (same kT for all)
             g_kTs = g_lib.create_group("kTs")

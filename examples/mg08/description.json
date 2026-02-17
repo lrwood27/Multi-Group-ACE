@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg08",
+    "problem_type": "Multigroup",
+    "description": "PUb-1-0-SP"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg08.inp",
+      "n": "mg08"
+    },
+    "outputs": {
+      "outp": "mg08o",
+      "mctal": "mg08m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.0
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

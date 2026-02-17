@@ -1,0 +1,3 @@
+ group Ehi     Elow      total     capture    scatter    fission        nu        chi
+     1       20    0.625           1         0.2         0.8           0           0           0
+     2    0.625    1e-05         0.5         0.1         0.4           0           0           0

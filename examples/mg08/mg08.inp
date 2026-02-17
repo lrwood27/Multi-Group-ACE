@@ -1,0 +1,17 @@
+la-ur-01-3082, analytic problem 8, PUb-1-0-SP, k=1.00000
+ 10  100 1.0   -1         imp:n=1
+ 99  0         +1         imp:n=0
+
+ 1  so   6.082547279
+
+ kcode  100000  1.0  100 600
+ sdef  rad=d1
+ si1  0  6.0825
+ sp1  -21  2
+ hsrc  1 -1e6 1e6  1 -1e6 1e6  1 -1e6 1e6
+ xs1   99902.02m 1e+06  99902.02m  0 1 1 11  0 0 2.5301e-08
+ m100  99902.02m  1.0
+ mgopt f 1
+ phys:n j 100
+ prdmp 1e7 4r
+ 

@@ -1,23 +1,23 @@
 {
   "zaid": "99953.01m",
-  "ng": 2,
+  "NG": 2,
 
-  "energy_bounds": [20.0, 0.625, 1.0e-5],
+  "erg": [20.0, 0.625, 1.0e-5],
 
-  "micro_xs": false,
+  "is_micro": false,
 
-  "total":   [1.0, 0.5],
-  "capture": [0.2, 0.1],
-  "fission": [0.0, 0.0],
+  "sigt":   [1.0, 0.5],
+  "sigc": [0.2, 0.1],
+  "sigf": [0.0, 0.0],
   "nu":      [0.0, 0.0],
   "chi":     [0.0, 0.0],
 
-  "scatter_matrix": [
-    [0.4, 0.4],
-    [0.0, 0.4]
+  "sigs": [
+    [0.4, 0.0],
+    [0.4, 0.4]
   ],
 
   "comment": "debug 2-group; downscatter only; no fission",
 
-  "temperature_mev": 2.5301e-8
+  "tmp": 2.5301e-8
 }
