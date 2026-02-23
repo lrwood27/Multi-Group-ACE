@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg14",
+    "problem_type": "Multigroup",
+    "description": "Ua-1-0-SP"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg14.inp",
+      "n": "mg14"
+    },
+    "outputs": {
+      "outp": "mg14o",
+      "mctal": "mg14m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.0
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

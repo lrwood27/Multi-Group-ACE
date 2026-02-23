@@ -1,0 +1,13 @@
+la-ur-01-3082, analytic problem 74, URR-3-0-IN, k=1.600000
+ 10  100 1.0    -1  imp:n=1
+
+ *1  so  1.0e6
+
+ kcode  100000  1.0  100 600
+ ksrc    0.0    0.0  0.0
+ hsrc  1 -1e6 1e6  1 -1e6 1e6  1 -1e6 1e6
+ xs1   99956.01m 1e+06  99956.01m  0 1 1 33  0 0 2.5301e-08
+ m100  99956.01m  1.0
+ mgopt f 3
+ phys:n  j 100
+ prdmp 1e7 4r

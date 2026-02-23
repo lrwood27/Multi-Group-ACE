@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg74",
+    "problem_type": "Multigroup",
+    "description": "URR-3-0-IN"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg74.inp",
+      "n": "mg74"
+    },
+    "outputs": {
+      "outp": "mg74o",
+      "mctal": "mg74m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.6
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

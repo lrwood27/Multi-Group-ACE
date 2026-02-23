@@ -77,7 +77,8 @@ def _parse_mcnp_surfaces(mcnp_input):
             if not tokens[0].lstrip("+-").isdigit():
                 continue
 
-            mnemonic = tokens[1].lower()
+            # Accept MCNP variants like "c/z" as well as "cz".
+            mnemonic = tokens[1].lower().replace("/", "")
 
             # Planes PX/PY/PZ
             if mnemonic in ("px", "py", "pz"):
@@ -119,21 +120,40 @@ def _parse_mcnp_surfaces(mcnp_input):
                 continue
 
             # Infinite cylinders: CZ/CX/CY
-            if mnemonic in ("cz", "cx", "cy") and len(tokens) >= 5:
+            # Accept both short forms (e.g. "cz R") and shifted forms
+            # (e.g. "cz x0 y0 R", "cx y0 z0 R", "cy x0 z0 R").
+            if mnemonic in ("cz", "cx", "cy"):
+                axis = mnemonic[1]
+                x0 = 0.0
+                y0 = 0.0
+                z0 = 0.0
+
                 try:
-                    x0 = float(tokens[2])
-                    y0 = float(tokens[3])
-                    R = float(tokens[4])
+                    if len(tokens) >= 5:
+                        a0 = float(tokens[2])
+                        b0 = float(tokens[3])
+                        R = float(tokens[4])
+                        if axis == "z":
+                            x0, y0 = a0, b0
+                        elif axis == "x":
+                            y0, z0 = a0, b0
+                        else:  # axis == "y"
+                            x0, z0 = a0, b0
+                    elif len(tokens) >= 3:
+                        R = float(tokens[2])
+                    else:
+                        continue
                 except ValueError:
                     continue
+
                 if R <= 0.0:
                     continue
-                axis = mnemonic[1]
+
                 dx = 1.0 if axis == "x" else 0.0
                 dy = 1.0 if axis == "y" else 0.0
                 dz = 1.0 if axis == "z" else 0.0
                 cyl_list.append(
-                    CylinderSurf(axis=axis, x0=x0, y0=y0, z0=0.0, dx=dx, dy=dy, dz=dz, R=R)
+                    CylinderSurf(axis=axis, x0=x0, y0=y0, z0=z0, dx=dx, dy=dy, dz=dz, R=R)
                 )
                 continue
 
@@ -172,38 +192,87 @@ def _build_infinite_box(gmsh, length=10.0):
 
 
 def _build_slab_box(gmsh, px_list, py_list, pz_list):
-    def bounds(planes):
-        vals = sorted(p.value for p in planes)
-        if len(vals) < 2:
-            raise ValueError
-        return vals[0], vals[-1]
+    def unique_sorted(values, tol=1.0e-12):
+        out = []
+        for v in sorted(values):
+            if not out or abs(v - out[-1]) > tol:
+                out.append(v)
+        return out
 
     other_width = 1.0
-    try:
-        x_min, x_max = bounds(px_list)
+    x_planes = unique_sorted([p.value for p in px_list])
+    y_planes = unique_sorted([p.value for p in py_list])
+    z_planes = unique_sorted([p.value for p in pz_list])
+
+    axis = None
+    cuts = []
+    if len(x_planes) >= 2:
+        axis = "x"
+        cuts = x_planes
         y_min, y_max = -0.5 * other_width, 0.5 * other_width
         z_min, z_max = -0.5 * other_width, 0.5 * other_width
-    except Exception:
-        try:
-            y_min, y_max = bounds(py_list)
-            x_min, x_max = -0.5 * other_width, 0.5 * other_width
-            z_min, z_max = -0.5 * other_width, 0.5 * other_width
-        except Exception:
-            try:
-                z_min, z_max = bounds(pz_list)
-                x_min, x_max = -0.5 * other_width, 0.5 * other_width
-                y_min, y_max = -0.5 * other_width, 0.5 * other_width
-            except Exception:
-                x_min, x_max = -0.5, 0.5
-                y_min, y_max = -0.5, 0.5
-                z_min, z_max = -0.5, 0.5
+    elif len(y_planes) >= 2:
+        axis = "y"
+        cuts = y_planes
+        x_min, x_max = -0.5 * other_width, 0.5 * other_width
+        z_min, z_max = -0.5 * other_width, 0.5 * other_width
+    elif len(z_planes) >= 2:
+        axis = "z"
+        cuts = z_planes
+        x_min, x_max = -0.5 * other_width, 0.5 * other_width
+        y_min, y_max = -0.5 * other_width, 0.5 * other_width
+    else:
+        # No axis has at least two planes; create a unit proxy box.
+        tag = gmsh.model.occ.addBox(-0.5, -0.5, -0.5, 1.0, 1.0, 1.0)
+        gmsh.model.occ.synchronize()
+        return [(3, tag)]
 
-    dx = x_max - x_min
-    dy = y_max - y_min
-    dz = z_max - z_min
-    tag = gmsh.model.occ.addBox(x_min, y_min, z_min, dx, dy, dz)
+    regions = []
+    for lo, hi in zip(cuts[:-1], cuts[1:]):
+        d = hi - lo
+        if d <= 0.0:
+            continue
+        if axis == "x":
+            tag = gmsh.model.occ.addBox(lo, y_min, z_min, d, y_max - y_min, z_max - z_min)
+        elif axis == "y":
+            tag = gmsh.model.occ.addBox(x_min, lo, z_min, x_max - x_min, d, z_max - z_min)
+        else:
+            tag = gmsh.model.occ.addBox(x_min, y_min, lo, x_max - x_min, y_max - y_min, d)
+        regions.append((3, tag))
+
+    if not regions:
+        # Degenerate plane list after filtering; fallback box.
+        tag = gmsh.model.occ.addBox(-0.5, -0.5, -0.5, 1.0, 1.0, 1.0)
+        gmsh.model.occ.synchronize()
+        return [(3, tag)]
+
+    if len(regions) > 1:
+        # Force conformal interfaces between adjacent slab regions.
+        # Without fragmentation, touching boxes can remain topologically
+        # disconnected (coincident faces with distinct node sets).
+        frag, _ = gmsh.model.occ.fragment(
+            [regions[0]],
+            regions[1:],
+            removeObject=True,
+            removeTool=True,
+        )
+        regions = [(dim, tag) for dim, tag in frag if dim == 3]
+        gmsh.model.occ.synchronize()
+
+        # Re-establish deterministic left-to-right (or y/z) region ordering.
+        def axis_center(region):
+            dim, tag = region
+            xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(dim, tag)
+            if axis == "x":
+                return 0.5 * (xmin + xmax)
+            if axis == "y":
+                return 0.5 * (ymin + ymax)
+            return 0.5 * (zmin + zmax)
+
+        regions = sorted(regions, key=axis_center)
+
     gmsh.model.occ.synchronize()
-    return [(3, tag)]
+    return regions
 
 
 def _build_sphere_regions(gmsh, spheres):
@@ -297,6 +366,64 @@ def _build_cylinder_regions(gmsh, cyl_list, pz_list):
     return regions
 
 
+def _tag_axis_aligned_boundary_surfaces(gmsh):
+    # Tag external axis-aligned faces so OpenSn boundary conditions can
+    # be assigned deterministically.
+    surfaces = gmsh.model.getEntities(2)
+    if not surfaces:
+        return
+
+    bboxes = []
+    for dim, tag in surfaces:
+        xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(dim, tag)
+        bboxes.append((tag, xmin, ymin, zmin, xmax, ymax, zmax))
+
+    gxmin = min(bb[1] for bb in bboxes)
+    gymin = min(bb[2] for bb in bboxes)
+    gzmin = min(bb[3] for bb in bboxes)
+    gxmax = max(bb[4] for bb in bboxes)
+    gymax = max(bb[5] for bb in bboxes)
+    gzmax = max(bb[6] for bb in bboxes)
+
+    xspan = gxmax - gxmin
+    yspan = gymax - gymin
+    zspan = gzmax - gzmin
+    tol = 1.0e-7 * max(xspan, yspan, zspan, 1.0)
+
+    face_tags = {
+        "xmin": [],
+        "xmax": [],
+        "ymin": [],
+        "ymax": [],
+        "zmin": [],
+        "zmax": [],
+    }
+
+    for tag, xmin, ymin, zmin, xmax, ymax, zmax in bboxes:
+        x_flat = abs(xmax - xmin) <= tol
+        y_flat = abs(ymax - ymin) <= tol
+        z_flat = abs(zmax - zmin) <= tol
+
+        if x_flat and abs(xmin - gxmin) <= tol:
+            face_tags["xmin"].append(tag)
+        elif x_flat and abs(xmax - gxmax) <= tol:
+            face_tags["xmax"].append(tag)
+        elif y_flat and abs(ymin - gymin) <= tol:
+            face_tags["ymin"].append(tag)
+        elif y_flat and abs(ymax - gymax) <= tol:
+            face_tags["ymax"].append(tag)
+        elif z_flat and abs(zmin - gzmin) <= tol:
+            face_tags["zmin"].append(tag)
+        elif z_flat and abs(zmax - gzmax) <= tol:
+            face_tags["zmax"].append(tag)
+
+    for name, tags in face_tags.items():
+        if not tags:
+            continue
+        pg = gmsh.model.addPhysicalGroup(2, tags)
+        gmsh.model.setPhysicalName(2, pg, name)
+
+
 def mcnp_to_gmsh_mesh(mcnp_input, mesh_out="geom.msh"):
     try:
         import gmsh
@@ -333,6 +460,8 @@ def mcnp_to_gmsh_mesh(mcnp_input, mesh_out="geom.msh"):
             continue
         gmsh.model.addPhysicalGroup(3, [tag], i)
         gmsh.model.setPhysicalName(3, i, f"region_{i}")
+
+    _tag_axis_aligned_boundary_surfaces(gmsh)
 
     gmsh.model.mesh.generate(3)
     gmsh.write(mesh_out)

@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg05",
+    "problem_type": "Multigroup",
+    "description": "PUb-1-0-IN"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg05.inp",
+      "n": "mg05"
+    },
+    "outputs": {
+      "outp": "mg05o",
+      "mctal": "mg05m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 2.290323
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

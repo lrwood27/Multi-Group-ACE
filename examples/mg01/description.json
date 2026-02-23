@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg01",
+    "problem_type": "Multigroup",
+    "description": "PUa-1-0-IN"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg01.inp",
+      "n": "mg01"
+    },
+    "outputs": {
+      "outp": "mg01o",
+      "mctal": "mg01m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 2.612903
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

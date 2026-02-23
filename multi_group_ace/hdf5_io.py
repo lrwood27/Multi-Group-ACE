@@ -15,16 +15,41 @@ def _temp_group_name(tmp_mev):
     return f"{int(round(T_K))}K", kT_eV
 
 
+def _scatter_order(mg):
+    sig1 = getattr(mg, "sig1", [])
+    if any(abs(x) > 0.0 for x in sig1):
+        return 1
+    return 0
+
+
+def _scatter_matrix_openmc_order(mg, order):
+    # Internal matrix convention:
+    #   mg.sigs[row, col] = Sigma_s(from=col -> to=row), row-major.
+    # OpenMC/OpenSn flattening convention for "scatter_matrix":
+    #   incoming group (g_in) outer, outgoing group (g_out) inner, then order.
+    # For P1, each (g_in, g_out) contributes [P0, P1].
+    ordered = []
+    for g_in in range(mg.NG):
+        for g_out in range(mg.NG):
+            idx = g_out * mg.NG + g_in
+            ordered.append(mg.sigs[idx])
+            if order >= 1:
+                ordered.append(mg.sig1[idx])
+    return ordered
+
+
 def _write_nuclide_group(root, name, mg, temp_group_name, kT_eV):
     fissionable = any(sf > 0.0 for sf in mg.sigf)
+    order = _scatter_order(mg)
+    representation = "isotropic" if order == 0 else "angle"
 
     g_lib = root.create_group(name)
     g_lib.attrs["atomic_weight_ratio"] = mg.awr
     g_lib.attrs["fissionable"] = bool(fissionable)
-    _set_fixed_ascii_attr(g_lib.attrs, "representation", "isotropic")
+    _set_fixed_ascii_attr(g_lib.attrs, "representation", representation)
     _set_fixed_ascii_attr(g_lib.attrs, "scatter_format", "legendre")
     _set_fixed_ascii_attr(g_lib.attrs, "scatter_shape", "[G][G'][Order]")
-    g_lib.attrs["order"] = 0
+    g_lib.attrs["order"] = order
 
     g_kTs = g_lib.create_group("kTs")
     g_kTs.create_dataset(temp_group_name, data=kT_eV)
@@ -41,7 +66,7 @@ def _write_nuclide_group(root, name, mg, temp_group_name, kT_eV):
     g_scat = g_T.create_group("scatter_data")
     g_scat.create_dataset("g_min", data=[1] * mg.NG)
     g_scat.create_dataset("g_max", data=[mg.NG] * mg.NG)
-    g_scat.create_dataset("scatter_matrix", data=mg.sigs)
+    g_scat.create_dataset("scatter_matrix", data=_scatter_matrix_openmc_order(mg, order))
     g_scat.create_dataset("multiplicity_matrix", data=[1.0] * (mg.NG * mg.NG))
 
 
@@ -59,7 +84,7 @@ def write_mgxs_hdf5_isotropic(mg, h5_path, library_name=None):
         f.attrs["version"] = [1, 0]
         f.attrs["energy_groups"] = mg.NG
         f.attrs["delayed_groups"] = 0
-        f.create_dataset("group structure", data=e_asc_eV)
+        f.attrs["group structure"] = e_asc_eV
 
         _write_nuclide_group(f, library_name or mg.zaid, mg, temp_group_name, kT_eV)
 
@@ -88,7 +113,7 @@ def write_problem_mgxs_library(mg_list, h5_path):
         f.attrs["version"] = [1, 0]
         f.attrs["energy_groups"] = ref.NG
         f.attrs["delayed_groups"] = 0
-        f.create_dataset("group structure", data=e_asc_eV)
+        f.attrs["group structure"] = e_asc_eV
 
         for mg in mg_list:
             _write_nuclide_group(f, mg.zaid, mg, temp_group_name, kT_eV)

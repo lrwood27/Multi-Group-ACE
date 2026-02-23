@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg06",
+    "problem_type": "Multigroup",
+    "description": "PUb-1-0-SL"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg06.inp",
+      "n": "mg06"
+    },
+    "outputs": {
+      "outp": "mg06o",
+      "mctal": "mg06m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.0
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

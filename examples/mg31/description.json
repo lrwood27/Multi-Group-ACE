@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg31",
+    "problem_type": "Multigroup",
+    "description": "PU-1-1-IN"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg31.inp",
+      "n": "mg31"
+    },
+    "outputs": {
+      "outp": "mg31o",
+      "mctal": "mg31m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 2.5
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

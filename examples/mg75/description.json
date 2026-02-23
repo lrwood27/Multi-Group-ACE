@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg75",
+    "problem_type": "Multigroup",
+    "description": "URR-6-0-IN"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg75.inp",
+      "n": "mg75"
+    },
+    "outputs": {
+      "outp": "mg75o",
+      "mctal": "mg75m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.6
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}

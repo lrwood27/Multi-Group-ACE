@@ -1,6 +1,61 @@
 from .core import MGData
 
 
+def _recover_p1_from_equiprob_bins(xss, nxs, jxs, NG, sigs):
+    # If anisotropy is present in the ACE table (NXS(3)>0), recover
+    # an approximate P1 moment from equiprobable angular bin edges.
+    # For a bin [mu_i, mu_{i+1}] sampled uniformly with probability 1/N,
+    # E[mu] = (1/N) * sum_i 0.5*(mu_i + mu_{i+1}), and sig1 = sigs * E[mu].
+    sig1 = [0.0] * (NG * NG)
+    if nxs[3] <= 0:
+        return sig1, 0
+
+    nbins = nxs[3] - 1
+    if nbins <= 0 or jxs[16] <= 0 or jxs[17] <= 0:
+        return sig1, max(nbins, 0)
+
+    try:
+        loc_table_start = int(round(xss[jxs[16]]))
+        mu_table_start = int(round(xss[jxs[17]]))
+    except (IndexError, ValueError):
+        return sig1, nbins
+
+    if loc_table_start <= 0 or mu_table_start <= 0:
+        return sig1, nbins
+
+    for from_g in range(NG):
+        for to_g in range(NG):
+            loc_idx = loc_table_start + from_g * NG + to_g
+            try:
+                loff = int(round(xss[loc_idx]))
+            except (IndexError, ValueError):
+                continue
+
+            mg_idx = to_g * NG + from_g
+
+            # -1: no scattering, 0: isotropic for this pair.
+            if loff <= 0:
+                continue
+
+            mu0 = mu_table_start + loff - 1
+            mu1 = mu0 + nbins
+            if mu0 <= 0 or mu1 >= len(xss):
+                continue
+
+            mu_edges = xss[mu0:mu1 + 1]
+            if len(mu_edges) != nbins + 1:
+                continue
+
+            mu_avg = 0.0
+            for b in range(nbins):
+                mu_avg += 0.5 * (mu_edges[b] + mu_edges[b + 1])
+            mu_avg /= nbins
+
+            sig1[mg_idx] = sigs[mg_idx] * mu_avg
+
+    return sig1, nbins
+
+
 def read_mg_ace(ace_file):
     with open(ace_file, "r") as f:
         header1 = f.readline()
@@ -66,6 +121,8 @@ def read_mg_ace(ace_file):
         for from_g in range(NG):
             sigs.append(xss[p0_start + from_g * NG + to_g])
 
+    sig1, nbins = _recover_p1_from_equiprob_bins(xss, nxs, jxs, NG, sigs)
+
     mg = MGData(
         zaid=zaid,
         za=nxs[2],
@@ -80,8 +137,8 @@ def read_mg_ace(ace_file):
         nu=nu,
         chi=chi,
         sigs=sigs,
-        sig1=[0.0] * (NG * NG),
-        nbins=max(nxs[3] - 1, 0),
+        sig1=sig1,
+        nbins=nbins,
         comment_short=comment_short,
         date=date_str,
     )
