@@ -1,0 +1,23 @@
+{
+  "general_info": {
+    "name": "mg04",
+    "problem_type": "Multigroup",
+    "description": "PUa-H2O(0.5)-1-0-SL"
+  },
+  "execution_info": {
+    "arguments": {
+      "i": "mg04.inp",
+      "n": "mg04"
+    },
+    "outputs": {
+      "outp": "mg04o",
+      "mctal": "mg04m"
+    }
+  },
+  "analytic_data": {
+    "k-eff": {
+      "val": 1.0
+    },
+    "reference": "LA-UR-01-3082"
+  }
+}
