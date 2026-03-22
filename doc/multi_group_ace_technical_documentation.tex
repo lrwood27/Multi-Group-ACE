@@ -1,0 +1,406 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{amsmath}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black,
+  pdftitle={Multi-Group-ACE Technical Documentation}
+}
+
+\lstdefinelanguage{bash}{
+  sensitive=true,
+  morekeywords={python,cd,ls},
+  alsoletter={-},
+  morecomment=[l]{\#},
+  morestring=[b]",
+  morestring=[b]'
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  keywordstyle=\color{blue!50!black},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{red!40!black}
+}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{2cm}
+{\Huge\bfseries Multi-Group-ACE\\[0.4cm]Technical Documentation\par}
+\vspace{1.25cm}
+{\Large Multigroup ACE, MGXS HDF5, and Mesh Preparation Utilities\par}
+\vfill
+\begin{minipage}{0.85\textwidth}
+\centering
+This document describes the code, example assets, and practical command-line workflows in the Multi-Group-ACE repository. It is intended as compact technical reference material for users working with multigroup cross sections, MCNP-style inputs, Gmsh meshes, and OpenSn or OpenMC compatible MGXS libraries.
+\end{minipage}
+\vfill
+{\large \today\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Repository Layout}
+
+The repository is organized around a reusable Python package, a set of verification and example assets, and supporting documentation. Table~\ref{tab:repo-layout} summarizes the main paths a new user will encounter.
+
+\begin{longtable}{p{0.28\textwidth} p{0.66\textwidth}}
+\caption{Top-level repository layout}\label{tab:repo-layout}\\
+\toprule
+\textbf{Path} & \textbf{Role} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Path} & \textbf{Role} \\
+\midrule
+\endhead
+\texttt{multi\_group\_ace/} & Primary package implementation. It contains the multigroup data model, JSON ingestion, ACE construction, ACE I/O, HDF5 MGXS output, MCNP-to-Gmsh mesh generation, and the main command-line driver. \\
+\texttt{examples/} & Verification-style case directories. Each \texttt{mgXX} directory contains source inputs such as MCNP decks, descriptions, and ACE tables; matching \texttt{mgXX\_out} directories contain generated assets such as \texttt{mgxs.h5}, \texttt{geom.msh}, and in one case an OpenSn execution driver. \\
+\texttt{json examples/} & Sample JSON configuration files for the JSON to ACE workflow. These are useful as input templates for new multigroup material definitions. \\
+\texttt{doc/} & Project documentation assets. This directory includes a PDF reference document and can also store generated technical documentation such as the present \texttt{.tex} file. \\
+\texttt{notes/} & Internal project notes and short reference text files that capture usage context and development constraints. \\
+\bottomrule
+\end{longtable}
+
+The primary user-facing interfaces are \texttt{python -m multi\_group\_ace.cli} for package-based execution and \texttt{python examples/mg08\_out/run\_keigen.py} for a concrete OpenSn solve driven from Python.
+
+\section{\texttt{multi\_group\_ace/\_\_init\_\_.py} and \texttt{multi\_group\_ace/core.py}}
+
+\subsection*{Purpose}
+These two files define the package surface and the central data container used everywhere else in the repository. \texttt{core.py} provides the \texttt{MGData} class and physical constants for temperature conversion, while \texttt{\_\_init\_\_.py} re-exports the package entry points so downstream code can import from \texttt{multi\_group\_ace} directly instead of reaching into each module. In practice, they establish the common vocabulary of the codebase: every loader, converter, writer, and mesh generator either creates, consumes, or returns objects that are standardized here.
+
+\subsection*{Inputs and Outputs}
+The main input to this logical module is a set of multigroup data values used to construct an \texttt{MGData} instance: material identifier, group structure, reaction cross sections, scattering matrices, temperature, and metadata. The main output is an in-memory object with a consistent layout, including the internal scattering convention of row equals destination group and column equals source group, plus a package namespace that exposes the loader, ACE builder, ACE I/O, HDF5 writer, and mesh-generation functions. If no anisotropic scattering moments are supplied, \texttt{MGData} automatically fills \texttt{sig1} with zeros so downstream code can always assume the field exists.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item Python standard library only.
+\item Downstream package modules re-exported through \texttt{\_\_init\_\_.py}.
+\end{itemize}
+
+\subsection*{Under the Hood}
+At import time, \texttt{\_\_init\_\_.py} executes a sequence of \texttt{from .module import name} statements. This has two effects. First, each imported object becomes available as an attribute on the package itself, so code can write \texttt{from multi\_group\_ace import build\_ace} instead of importing from \texttt{converter.py} directly. Second, the \texttt{\_\_all\_\_} list defines which names are exported when users write \texttt{from multi\_group\_ace import *}; the file is therefore acting as a package-level facade rather than a place where new calculations occur.
+
+\texttt{core.py} is intentionally passive. It does not validate input lengths, enforce units, or derive missing values; it only stores them. That design keeps the data model lightweight and lets validation remain close to the I/O boundary, such as the JSON loader or the ACE reader. The class also preserves the internal scatter ordering used throughout the package:
+
+\begin{lstlisting}
+row = destination group
+column = source group
+
+For NG = 2:
+[1<-1, 2<-1, 1<-2, 2<-2]
+\end{lstlisting}
+
+This convention matters because several external formats use different flattening rules. The converter and HDF5 writer both rely on the same \texttt{MGData} layout and explicitly reorder the data only at the point where an external file format requires a different convention. The constants \texttt{KB\_EV\_PER\_K} and \texttt{MEV\_TO\_EV} are also defined here so temperature conversion is numerically consistent between ACE, HDF5, and OpenSn-facing routines.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -c 'from multi_group_ace import load_from_json; mg, _ = load_from_json("config/two_group_problem.json"); print(mg.zaid, mg.NG)'
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/json\_loader.py}}
+
+\subsection*{Purpose}
+This module reads a JSON description of multigroup data and converts it into an \texttt{MGData} object. It validates the expected keys, enforces a strictly descending energy grid, handles optional microscopic-to-macroscopic conversion using atom density, normalizes fission spectrum data when needed, and assigns default metadata such as the output file stem and date.
+
+\subsection*{Inputs and Outputs}
+The input is a JSON file containing fields such as \texttt{zaid}, \texttt{NG}, \texttt{erg}, \texttt{sigt}, \texttt{sigc}, \texttt{sigf}, \texttt{nu}, \texttt{chi}, and \texttt{sigs}, with optional fields including \texttt{sig1}, \texttt{is\_micro}, \texttt{atom\_density}, \texttt{nbins}, \texttt{comment}, \texttt{tmp}, and \texttt{file}. The output is a tuple containing a populated \texttt{MGData} object and the base filename that should be used for the generated ACE table.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{json}
+\item \texttt{datetime}
+\item \texttt{multi\_group\_ace.core}
+\end{itemize}
+
+\subsection*{Parsing and Validation Flow}
+The loader begins by reading the entire JSON file into a Python dictionary and immediately checking for the required keys. It then extracts the ZA portion from \texttt{zaid}, converts the energy grid to floating point values, and passes the grid through a helper that reverses it if necessary and rejects any non-strict ordering. Scalar vectors such as \texttt{sigt}, \texttt{sigc}, and \texttt{sigf} are expanded to exactly \texttt{NG} entries, while scattering data can be supplied either as a flat array or as an \texttt{NG x NG} nested list.
+
+If \texttt{is\_micro} is true, the loader multiplies the supplied microscopic cross sections by \texttt{atom\_density} before creating \texttt{MGData}. If fission is absent, it explicitly zeros out \texttt{sigf}, \texttt{nu}, and \texttt{chi}; if fission is present but \texttt{chi} is not normalized, it normalizes the spectrum so the HDF5 and ACE writers later receive a consistent source vector. The loader also interprets \texttt{tmp > 1.0} as a temperature-like quantity that should be converted into ACE-style \texttt{kT} in MeV.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -c 'from multi_group_ace.json_loader import load_from_json; mg, out = load_from_json("json examples/ex4.json"); print(out, mg.erg)'
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/converter.py}}
+
+\subsection*{Purpose}
+This module converts the abstract multigroup representation stored in \texttt{MGData} into the \texttt{NXS}, \texttt{JXS}, and \texttt{XSS} arrays expected by a simple multigroup ACE table. It also contains the equiprobable angular-bin generator used when anisotropic scattering is present and the P1 moment must be represented through angular bin edges.
+
+\subsection*{Inputs and Outputs}
+The input is one \texttt{MGData} instance containing energy boundaries, total, capture, fission, and scattering data, plus optional P1 scattering moments and an angular bin count. The output is a three-part ACE representation: integer control arrays \texttt{NXS} and \texttt{JXS}, and the floating-point payload array \texttt{XSS}, all ready to be written to disk by the ACE I/O module.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{multi\_group\_ace.core}
+\end{itemize}
+
+\subsection*{How the ACE Arrays Are Built}
+The converter first determines whether the material should be treated as isotropic by checking whether every entry in \texttt{sig1} is zero. It then fills the \texttt{NXS} control array with global table metadata such as the ZA identifier, group count, and anisotropy flag, and it fills the \texttt{JXS} array with pointers into the \texttt{XSS} payload. In other words, \texttt{NXS} describes what kind of table this is, \texttt{JXS} describes where each block begins, and \texttt{XSS} stores the actual floating-point data.
+
+The energy grid is stored in ACE as midpoint-width pairs rather than direct group boundaries, so the converter computes a midpoint and width for each group from the descending energy edges in \texttt{mg.erg}. Reaction vectors such as total, fission, \texttt{nu}, \texttt{chi}, and capture are then written into consecutive \texttt{XSS} blocks. The scattering matrix is transposed at this stage because the package stores scattering as destination-by-source, while the ACE block is written source-by-destination.
+
+If anisotropic scattering is present, the converter allocates additional pointer blocks and writes equiprobable angular bin edges for each nonzero scattering pair. Those angular edges are not stored as a direct P1 moment; they are stored as a sequence of cosine boundaries that reproduce the desired first angular moment when sampled uniformly within each bin. This is why the ACE reader later has to reconstruct an approximate \texttt{sig1} from the bin edges rather than reading \texttt{sig1} directly from a dedicated array.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -c 'from multi_group_ace.json_loader import load_from_json; from multi_group_ace.converter import build_ace; mg, _ = load_from_json("config/two_group_problem.json"); nxs, jxs, xss = build_ace(mg); print(nxs[1], jxs[13], len(xss) - 1)'
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/ace\_io.py}}
+
+\subsection*{Purpose}
+This module reads and writes simple multigroup ACE files and related text outputs. It reconstructs \texttt{MGData} from an ACE table, writes ACE text files, emits an \texttt{xsdir} entry suitable for MCNP-style use, and produces a compact summary report of the groupwise reaction data and scattering totals. It is the part of the package that translates between the package's internal data model and the pointer-based ACE table layout found on disk.
+
+\subsection*{Inputs and Outputs}
+Inputs include an existing ACE file path for reading or, for writing, an \texttt{MGData} object together with the \texttt{NXS}, \texttt{JXS}, and \texttt{XSS} arrays produced by the converter. Outputs include an ACE table file, a summary text file with per-group totals, and an \texttt{xsdir} text file that can be referenced from MCNP input.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item Python standard library file I/O
+\item \texttt{multi\_group\_ace.core}
+\end{itemize}
+
+\subsection*{How ACE Parsing Works}
+The reader treats the ACE file as a structured text record with four layers. It first reads the two header lines, then skips the four fixed-format lines that the writer emits as placeholders, then reads the 16 \texttt{NXS} integers and 32 \texttt{JXS} integers, and finally reads exactly \texttt{NXS(1)} floating-point values into the \texttt{XSS} payload array. The arrays are stored internally as one-based lists so the code can mirror the indexing style used by ACE documentation and by the original table structure.
+
+Once the control arrays are loaded, the reader knows how to interpret the payload. It uses \texttt{NXS(5)} to determine the number of energy groups, \texttt{NXS(2)} to recover the ZA value, and the pointer \texttt{JXS(1)} to find the midpoint-width representation of the energy grid. The code reconstructs the descending group boundaries by computing
+\[
+E_{\mathrm{high}} = \mathrm{mid} + \tfrac{1}{2}\mathrm{width}, \qquad
+E_{\mathrm{low}} = \mathrm{mid} - \tfrac{1}{2}\mathrm{width}.
+\]
+It then reads the total, fission, \texttt{nu}, \texttt{chi}, and capture vectors from the blocks pointed to by \texttt{JXS(2)} through \texttt{JXS(6)}.
+
+Scattering is handled in two stages. First, the reader locates the P0 scattering block by following the pointer stored at \texttt{JXS(13)}, then transposes the ACE ordering into the package ordering so that \texttt{mg.sigs} again means destination-by-source. Second, it determines whether angular information is present by checking \texttt{NXS(3)}. If \texttt{NXS(3) <= 0}, the table is treated as isotropic and the returned \texttt{sig1} array is all zeros. If \texttt{NXS(3) > 0}, the file contains equiprobable angular bins; the reader uses \texttt{JXS(16)} and \texttt{JXS(17)} to find the location-offset table and the cosine-edge table, computes the average cosine in each populated scattering bin, and multiplies that by the P0 scattering value to recover an approximate P1 moment. This is how the code distinguishes isotropic from anisotropic tables and reconstructs enough angular information for downstream OpenSn/OpenMC-style output.
+
+The writer performs the inverse operation. It does not infer new physics from the arrays; it serializes the \texttt{MGData}-derived \texttt{NXS}, \texttt{JXS}, and \texttt{XSS} arrays back into ACE text format, preserving the same pointer layout. The auxiliary writers then produce an \texttt{xsdir} entry and a summary table so the table can be inspected or referenced by external transport inputs.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -c 'from multi_group_ace.ace_io import read_mg_ace; mg, _, _, _ = read_mg_ace("ace/problem.ace"); print(mg.zaid, mg.comment_short, mg.NG)'
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/hdf5\_io.py}}
+
+\subsection*{Purpose}
+This module writes multigroup cross-section libraries in an OpenMC-compatible HDF5 structure that OpenSn can also consume. It handles temperature naming, fixed-length ASCII attributes, energy-group metadata, per-nuclide datasets, and both single-nuclide and multi-nuclide library output. The key responsibility of the module is to convert the package's in-memory representation into the exact hierarchy of groups, datasets, and attributes expected by downstream MGXS readers.
+
+\subsection*{Inputs and Outputs}
+Inputs are one or more \texttt{MGData} objects plus an output \texttt{.h5} filename and, optionally, a library name to use inside the HDF5 file. The output is an \texttt{mgxs.h5} file containing top-level library metadata, an energy-group structure stored in ascending eV, and per-material groups with total, absorption, fission, chi, nu-fission, and scatter data laid out in the OpenMC multigroup schema. The module writes either a single nuclide group or one group per ACE-derived material, but in both cases the root-level structure of the file is the same.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{h5py}
+\item \texttt{multi\_group\_ace.core}
+\end{itemize}
+
+\subsection*{HDF5 Structure Written by the Code}
+At the root of the file, the writer creates a small set of attributes that describe the library as a whole. The string attributes are written with fixed-length ASCII datatypes because some OpenSn readers expect C-style fixed-size strings rather than variable-length UTF strings. The root then stores the global group structure in ascending eV, even though \texttt{MGData} stores energy boundaries internally in descending MeV.
+
+\begin{lstlisting}
+/
+  attrs:
+    filetype = "mgxs"
+    version = [1, 0]
+    energy_groups = NG
+    delayed_groups = 0
+    group structure = [E0, E1, ..., ENG]   # ascending, in eV
+
+  /<nuclide_name>
+    attrs:
+      atomic_weight_ratio = AWR
+      fissionable = true/false
+      representation = "isotropic" or "angle"
+      scatter_format = "legendre"
+      scatter_shape = "[G][G'][Order]"
+      order = 0 or 1
+
+    /kTs
+      /294K = kT in eV
+
+    /294K
+      /total
+      /absorption
+      /fission            # only if fissionable
+      /chi                # only if fissionable
+      /nu-fission         # only if fissionable
+      /scatter_data
+        /g_min
+        /g_max
+        /scatter_matrix
+        /multiplicity_matrix
+\end{lstlisting}
+
+\subsection*{How the Data Are Mapped into That Structure}
+The temperature group name is created by converting ACE-style \texttt{kT} in MeV into eV and then into Kelvin using the Boltzmann constant from \texttt{core.py}. For a room-temperature table, this typically produces a group named \texttt{294K}. The writer also computes \texttt{absorption} as \texttt{sigc + sigf}, which matches the way transport codes often expect absorptive loss to be reported independently from scattering.
+
+Scattering is where most of the format conversion occurs. The helper \texttt{\_scatter\_order()} examines \texttt{mg.sig1}; if every P1 term is zero, the file is written as order 0 with \texttt{representation = "isotropic"}. If any P1 term is nonzero, the file is written as order 1 with \texttt{representation = "angle"}. The helper \texttt{\_scatter\_matrix\_openmc\_order()} then flattens the internal destination-by-source matrix into the ordering expected by the HDF5 schema: incoming group outer loop, outgoing group inner loop, and, for anisotropic data, P0 followed by P1 for each pair. The datasets \texttt{g\_min} and \texttt{g\_max} are filled densely, which indicates that each incoming group potentially scatters across the full group range represented by the stored matrix.
+
+When writing a combined problem library, \texttt{write\_problem\_mgxs\_library()} first checks that every material shares the same group count and the same energy grid. It then writes one nuclide group per \texttt{MGData} object beneath the same root. This makes the resulting \texttt{mgxs.h5} file suitable for problems in which a single mesh uses multiple material datasets.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --ace ace/problem.ace --h5 out/problem_mgxs.h5 --library-name 99902.02m
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/gmsh\_geometry.py}}
+
+\subsection*{Purpose}
+This module converts available geometry descriptions into a Gmsh mesh file that can be paired with the generated cross sections. It prefers explicit \texttt{.geo} or \texttt{.step}/\texttt{.stp} geometry files when they exist, and otherwise parses a subset of MCNP surface cards such as planes, spheres, and cylinders to build a corresponding mesh through the Gmsh Python API. It therefore serves as both a geometry selection layer and a geometry translation layer.
+
+\subsection*{Inputs and Outputs}
+Inputs are a source problem directory or an individual MCNP input file together with an output mesh path and, optionally, a Gmsh executable path. Outputs are \texttt{geom.msh} files with physical region tags and deterministic axis-aligned boundary names such as \texttt{xmin}, \texttt{xmax}, \texttt{ymin}, and \texttt{zmax}, which makes later boundary-condition assignment more predictable. When a directory contains an explicit \texttt{.geo} or \texttt{.step}/\texttt{.stp} file, that geometry is meshed directly; otherwise the code derives geometry from the text of the MCNP input.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{os}
+\item \texttt{subprocess}
+\item \texttt{gmsh} Python package or a local Gmsh executable
+\end{itemize}
+
+\subsection*{From MCNP Text to Geometry Objects}
+The fallback path begins in \texttt{\_parse\_mcnp\_surfaces()}, which reads the MCNP input file line by line as plain text. For each line, it removes any inline comment that starts with \texttt{\$}, skips blank lines, skips comment cards beginning with \texttt{c}, and ignores any line whose first token is not a numeric surface identifier. The second token is then treated as the surface mnemonic and normalized, so forms such as \texttt{c/z} are converted to \texttt{cz} before interpretation.
+
+Only a subset of MCNP surface cards is recognized, but each supported card is translated into a lightweight Python geometry object:
+\begin{itemize}
+\item \texttt{px}, \texttt{py}, \texttt{pz} become \texttt{Plane} objects.
+\item \texttt{so}, \texttt{s}, and \texttt{sph} become \texttt{SphereSurf} objects.
+\item \texttt{cz}, \texttt{cx}, \texttt{cy}, and \texttt{rcc} become \texttt{CylinderSurf} objects.
+\end{itemize}
+The parser therefore does not build a general constructive solid geometry model of all MCNP syntax. Instead, it extracts enough structured information to build a limited class of slab, spherical, cylindrical, and simple infinite-domain proxy meshes.
+
+\subsection*{How Those Objects Become a Gmsh Mesh}
+After parsing, \texttt{mcnp\_to\_gmsh\_mesh()} decides which builder to use. If spheres are present, it creates nested Gmsh spheres and subtracts each inner sphere from the next outer sphere to form shells. If cylinders are present, it creates one or more cylinders and similarly subtracts nested radii to form cylindrical shells or rings. If plane surfaces are present, it sorts unique cut locations and creates adjacent boxes between consecutive cuts; when multiple slab regions exist, it uses Gmsh fragmentation so the internal interfaces are conformal rather than duplicated coincident faces.
+
+The filename suffixes \texttt{-IN}, \texttt{-SL}, \texttt{-CY}, \texttt{-SP}, and \texttt{-ISLC} are used only as hints. They help the code choose a fallback geometric interpretation when the parsed primitive lists are sparse or ambiguous, but they do not replace parsing. Once regions have been created, each 3D volume is assigned a physical group name such as \texttt{region\_1}, \texttt{region\_2}, and so on. The helper \texttt{\_tag\_axis\_aligned\_boundary\_surfaces()} then scans the mesh boundary surfaces, computes bounding boxes, and tags outer faces as \texttt{xmin}, \texttt{xmax}, \texttt{ymin}, \texttt{ymax}, \texttt{zmin}, or \texttt{zmax} when they are axis-aligned.
+
+Finally, Gmsh generates a three-dimensional mesh and writes it to disk. After writing, the file is normalized to Unix line endings because OpenSn expects text mesh files with \texttt{LF} newlines. When \texttt{make\_mesh\_for\_problem()} finds a \texttt{.geo} or \texttt{.step} file instead of relying on MCNP parsing, it bypasses the Python geometry builders entirely and invokes the Gmsh executable directly on that source file.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -c 'from multi_group_ace.gmsh_geometry import make_mesh_for_problem; make_mesh_for_problem("cases/sphere_case", "out/sphere_case", gmsh_exe="gmsh")'
+\end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/cli.py}}
+
+\subsection*{Purpose}
+This module is the main command-line entry point for the package. It exposes three user-facing workflows: JSON to ACE generation, ACE to HDF5 conversion, and recursive directory scanning that builds one \texttt{mgxs.h5} file per problem directory while optionally generating a companion mesh.
+
+\subsection*{Inputs and Outputs}
+The CLI accepts \texttt{--config} for JSON-driven ACE generation, \texttt{--ace} and \texttt{--h5} for single-file HDF5 conversion, or \texttt{--verification-root} and \texttt{--outdir} for recursive batch processing. Depending on the mode, it produces ACE tables, \texttt{xsdir} and summary text files, one or more \texttt{mgxs.h5} libraries, and optional \texttt{geom.msh} meshes.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{argparse}
+\item \texttt{os}
+\item \texttt{multi\_group\_ace.json\_loader}
+\item \texttt{multi\_group\_ace.converter}
+\item \texttt{multi\_group\_ace.ace\_io}
+\item \texttt{multi\_group\_ace.hdf5\_io}
+\item \texttt{multi\_group\_ace.gmsh\_geometry}
+\end{itemize}
+
+\subsection*{Dispatch Logic}
+The CLI uses mutually exclusive high-level modes selected by which arguments are present. If \texttt{--verification-root} is supplied, it walks the directory tree, tries to interpret every file as an ACE table, groups successful reads by output problem directory, and writes one combined \texttt{mgxs.h5} per problem. If \texttt{--ace} is supplied, it performs a single ACE-to-HDF5 conversion. If neither of those is present, it expects \texttt{--config} and runs the JSON-to-ACE workflow, including summary and \texttt{xsdir} generation.
+
+The batch mode is particularly important because it is where the repository turns many individual ACE files into a problem-oriented asset layout. Instead of writing one HDF5 file per ACE file, it aggregates all ACE tables discovered under the same source problem directory and emits a single library containing one HDF5 group per material. That grouping matches the way a transport problem will later assign multiple materials to one mesh.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --verification-root examples --outdir build/verification --make-mesh --gmsh gmsh
+\end{lstlisting}
+
+\section{\texttt{examples/} and \texttt{json examples/}}
+
+\subsection*{Purpose}
+These directories provide concrete test assets for the codebase. The \texttt{examples/} tree contains source problem directories and generated outputs for several verification-style cases, while \texttt{json examples/} supplies compact JSON inputs for defining new multigroup materials without starting from an ACE file.
+
+\subsection*{Inputs and Outputs}
+Typical inputs in \texttt{examples/mgXX/} include MCNP input decks, a \texttt{description.json} file, and one or more ACE tables. Typical outputs in \texttt{examples/mgXX\_out/} include \texttt{mgxs.h5}, \texttt{geom.msh}, and, for one case, a Python OpenSn driver plus solver outputs such as \texttt{k\_eff.txt} and ParaView files.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item No direct Python dependencies; these directories are data and example assets consumed by the CLI and example scripts.
+\end{itemize}
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --config "json examples/ex4.json"
+\end{lstlisting}
+
+\section{\texttt{examples/mg08\_out/run\_keigen.py}}
+
+\subsection*{Purpose}
+This script is a Python-based OpenSn execution driver that demonstrates how to use the generated mesh and MGXS library in a transport solve. It loads \texttt{geom.msh} and \texttt{mgxs.h5}, constructs a discrete ordinates problem with a product quadrature, assigns vacuum boundary conditions, executes a power-iteration k-eigenvalue solve, and writes field-function output for visualization.
+
+\subsection*{Inputs and Outputs}
+The required inputs are a Gmsh mesh file, an \texttt{mgxs.h5} library, a dataset name inside that library, and a temperature value used to select the correct multigroup data. Outputs include the reported eigenvalue, mesh export files, and scalar flux files in ParaView-compatible \texttt{.pvtu} form. This repository does not currently generate a standalone OpenSn text input deck; the OpenSn-facing execution example is this Python script.
+
+\subsection*{Key Dependencies}
+\begin{itemize}
+\item \texttt{pyopensn}
+\item \texttt{os}
+\item \texttt{re}
+\end{itemize}
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python examples/mg08_out/run_keigen.py
+\end{lstlisting}
+
+\section{Workflows}
+
+\subsection*{Workflow 1: JSON Material Definition to ACE Output}
+This workflow starts from a compact JSON description of groupwise cross sections and produces a simple multigroup ACE table together with a summary text file and an \texttt{xsdir} entry. It is the shortest path when the source data already exist in grouped form and the immediate target is an MCNP-style ACE table.
+
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --config "json examples/ex4.json"
+python -c 'from multi_group_ace.ace_io import read_mg_ace; mg, _, _, _ = read_mg_ace("mg02xsecs"); print(mg.zaid, mg.NG)'
+\end{lstlisting}
+
+\subsection*{Workflow 2: ACE Library and MCNP Geometry to OpenSn-Ready Assets}
+This workflow combines ACE-to-HDF5 conversion with MCNP geometry-to-Gmsh conversion. The result is a pair of artifacts, \texttt{mgxs.h5} and \texttt{geom.msh}, that can be consumed by downstream OpenSn or OpenMC-style multigroup workflows.
+
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --ace ace/problem.ace --h5 out/problem/mgxs.h5 --library-name 99902.02m
+python -c 'from multi_group_ace.gmsh_geometry import make_mesh_for_problem; make_mesh_for_problem("cases/problem_case", "out/problem", gmsh_exe="gmsh")'
+\end{lstlisting}
+
+\subsection*{Workflow 3: Batch Verification Conversion with Mesh Generation}
+This workflow scans a directory tree of verification problems, identifies valid ACE tables, groups them by problem directory, writes one combined \texttt{mgxs.h5} per problem, and optionally generates a mesh next to each library. It is the most efficient way to prepare a large set of bundled examples for solver-side inspection.
+
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --verification-root examples --outdir build/verification --make-mesh --gmsh gmsh
+\end{lstlisting}
+
+\subsection*{Workflow 4: Prepared MGXS and Mesh to OpenSn Solve}
+This workflow shows the full handoff from repository-generated assets into an OpenSn calculation. It first creates the cross-section library and mesh for a case directory, then runs the Python OpenSn driver that loads those files, solves the k-eigenvalue problem, and exports visualization data.
+
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --ace examples/mg08/99902.02m --h5 examples/mg08_out/mgxs.h5 --library-name 99902.02m
+python -c 'from multi_group_ace.gmsh_geometry import make_mesh_for_problem; make_mesh_for_problem("examples/mg08", "examples/mg08_out", gmsh_exe="gmsh")'
+python examples/mg08_out/run_keigen.py
+\end{lstlisting}
+
+\end{document}
