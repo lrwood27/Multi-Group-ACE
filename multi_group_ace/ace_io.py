@@ -58,12 +58,15 @@ def _recover_p1_from_equiprob_bins(xss, nxs, jxs, NG, sigs):
 
 def read_mg_ace(ace_file):
     with open(ace_file, "r") as f:
+        # ACE text files begin with two header lines, followed here by
+        # four placeholder lines, then NXS/JXS/XSS data.
         header1 = f.readline()
         header2 = f.readline()
 
         for _ in range(4):
             f.readline()
 
+        # Read the fixed-size control arrays before reading the XSS payload.
         nxs_vals = []
         while len(nxs_vals) < 16:
             nxs_vals.extend(int(x) for x in f.readline().split())
@@ -97,6 +100,7 @@ def read_mg_ace(ace_file):
     comment = comment_short
 
     NG = nxs[5]
+    # Reconstruct the descending group boundaries from ACE midpoint/width data.
     mids = [xss[jxs[1] + k] for k in range(NG)]
     widths = [xss[jxs[1] + NG + k] for k in range(NG)]
 
@@ -113,6 +117,8 @@ def read_mg_ace(ace_file):
     chi = [xss[jxs[5] + k] for k in range(NG)]
     sigc = [xss[jxs[6] + k] for k in range(NG)]
 
+    # JXS(13) points to a location inside XSS that stores the start of the
+    # P0 scatter matrix block.
     p0_start = int(xss[jxs[13]])
     sigs = []
     # Convert ACE scatter layout (row=from, col=to) to internal layout
@@ -143,6 +149,8 @@ def read_mg_ace(ace_file):
         date=date_str,
     )
 
+    # Return both the interpreted MGData object and the raw ACE arrays so
+    # callers can inspect or rewrite the original layout if needed.
     return mg, nxs, jxs, xss
 
 
@@ -165,6 +173,7 @@ def write_ace(ace_file, mg, nxs, jxs, xss):
                 f.write("\n")
 
         n = nxs[1]
+        # The ACE payload is written 4 values per line for readability.
         for k in range(1, n + 1):
             f.write(f"{xss[k]:20.12g}")
             if k % 4 == 0:
@@ -189,6 +198,8 @@ def write_summary(basefile, mg, nxs, jxs, xss):
     lines.append(" group Ehi     Elow      total     capture    scatter    fission        nu        chi")
 
     for k in range(NG):
+        # Recompute the total out-scatter from the ACE-layout matrix so the
+        # text summary matches what was actually written to disk.
         scat = 0.0
         # xss stores ACE scatter layout (row=from, col=to).
         for j in range(NG):

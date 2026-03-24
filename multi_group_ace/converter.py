@@ -39,6 +39,10 @@ def get_equiprob_bins(nbins, N, A):
 
 
 def build_ace(mg):
+    # Convert the package's internal data model into the three core ACE arrays:
+    #   NXS = global table metadata
+    #   JXS = pointers into the XSS payload
+    #   XSS = the floating-point data blocks themselves
     NG = mg.NG
     NBINS = mg.nbins
     ISOTROPIC = not any(abs(x) > 0.0 for x in mg.sig1)
@@ -46,6 +50,8 @@ def build_ace(mg):
     nxs = [0] * 17
     jxs = [0] * 33
 
+    # Fill the control arrays first. These values tell ACE readers what kind
+    # of table this is and where each data block starts.
     nxs[2] = mg.za
     nxs[3] = 0 if ISOTROPIC else NBINS + 1
     nxs[5] = NG
@@ -71,6 +77,8 @@ def build_ace(mg):
             xss.extend([0.0] * (idx - len(xss) + 1))
         xss[idx] = float(val)
 
+    # ACE stores the energy grid as midpoint/width pairs rather than directly
+    # storing the group boundaries.
     for k in range(NG):
         mid = 0.5 * (mg.erg[k] + mg.erg[k + 1])
         width = mg.erg[k] - mg.erg[k + 1]
@@ -88,6 +96,8 @@ def build_ace(mg):
     # ACE block convention:
     #   row = from, col = to
     # so we transpose while writing ACE.
+    # The first value at JXS(13) is itself a pointer to the start of the
+    # P0 scatter matrix block.
     put(jxs[13], jxs[13] + 1)
     for from_g in range(NG):
         for to_g in range(NG):
@@ -96,9 +106,14 @@ def build_ace(mg):
             put(ace_idx, mg.sigs[mg_idx])
 
     if ISOTROPIC:
+        # A zeroed angular section tells the ACE reader there is no higher-
+        # order angular information to recover.
         put(jxs[16], 0.0)
         put(jxs[17], 0.0)
     else:
+        # For anisotropic data, write:
+        #   JXS(16) -> location table for each scattering pair
+        #   JXS(17) -> the actual mu-bin edges
         next16 = jxs[16] + 1
         next17 = jxs[17] + 1
         put(jxs[16], next16)
@@ -127,5 +142,6 @@ def build_ace(mg):
                     put(next17, mus[m])
                     next17 += 1
 
+    # NXS(1) is the final XSS payload length.
     nxs[1] = len(xss) - 1
     return nxs, jxs, xss

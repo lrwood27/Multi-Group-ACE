@@ -1,3 +1,5 @@
+# Re-export the small public API from the package root so user code can
+# import from "multi_group_ace" directly instead of each internal module.
 from .core import MGData, KB_EV_PER_K, MEV_TO_EV
 from .json_loader import load_from_json
 from .converter import build_ace
@@ -7,6 +9,7 @@ from .gmsh_geometry import mcnp_to_gmsh_mesh, make_mesh_for_problem
 
 __version__ = "0.1.0"
 
+# Limit wildcard imports to the intended public surface.
 __all__ = [
     "MGData",
     "KB_EV_PER_K",

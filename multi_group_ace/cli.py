@@ -40,6 +40,8 @@ def scan_verification_and_convert(root_dir, out_dir, library_name=None, make_mes
     per_problem_mg = {}
     mesh_done_dirs = set()
 
+    # Walk the tree, try to interpret files as ACE tables, and group any
+    # successful reads by problem directory so each problem gets one mgxs.h5.
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
             ace_path = os.path.join(dirpath, fname)
@@ -83,6 +85,10 @@ def main():
 
     args = parser.parse_args()
 
+    # The CLI supports three modes:
+    #   verification-root -> many ACE tables to many mgxs.h5 files (+ mesh)
+    #   ace               -> one ACE table to one mgxs.h5
+    #   config            -> JSON description to ACE output
     if args.verification_root:
         scan_verification_and_convert(
             root_dir=args.verification_root,
@@ -100,6 +106,8 @@ def main():
     if not args.config:
         parser.error("Provide --config, or --ace, or --verification-root.")
 
+    # JSON-to-ACE path: normalize JSON input, build ACE arrays, then emit
+    # the table plus the helper files used for inspection/MCNP setup.
     mg, ace_file = load_from_json(args.config)
     nxs, jxs, xss = build_ace(mg)
 

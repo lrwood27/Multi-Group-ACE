@@ -53,17 +53,21 @@ def load_from_json(path):
     with open(path, "r") as f:
         cfg = json.load(f)
 
-    
+    # Translate the user-facing JSON schema into the package's single
+    # internal representation, MGData. After this point, the rest of the
+    # code no longer needs to reason about raw JSON keys.
     required = ["zaid", "NG", "erg", "sigt", "sigc", "sigf", "nu", "chi", "sigs"]
     for key in required:
         if key not in cfg:
             raise KeyError(f"Missing required key in JSON: {key}")
 
+    # The ZAID string carries both the table name and the integer ZA value.
     zaid = str(cfg["zaid"])
     if "." not in zaid:
         raise ValueError("zaid must look like '99902.01m'.")
     za = int(zaid.split(".")[0])
 
+    # Keep the internal energy grid in strictly descending order.
     NG = int(cfg["NG"])
     erg = ensure_descending([float(x) for x in cfg["erg"]])
     if len(erg) != NG + 1:
@@ -71,6 +75,7 @@ def load_from_json(path):
 
     awr = float(cfg.get("awr", 1.0))
     tmp = float(cfg.get("tmp", 2.5301e-8))
+    # Allow temperatures supplied in Kelvin-like units and convert to ACE kT.
     if tmp > 1.0:
         tmp *= 8.617385e-11
 
@@ -85,6 +90,8 @@ def load_from_json(path):
         atom_density = float(atom_density)
 
     def maybe_macro(raw, label, length):
+        # When the JSON is microscopic, promote to macroscopic values once
+        # here so the rest of the package only sees one convention.
         vals = expand_to_length(raw, length, label)
         if is_micro:
             return [atom_density * x for x in vals]
@@ -100,6 +107,8 @@ def load_from_json(path):
     sig1_raw = cfg.get("sig1", [])
     sig1 = maybe_macro(_scatter_to_flat(sig1_raw, NG, "sig1"), "sig1", NG * NG) if sig1_raw else [0.0] * (NG * NG)
 
+    # Keep the fission source internally self-consistent. Non-fissionable
+    # tables should not carry leftover nu/chi information.
     if any(sf > 0.0 for sf in sigf):
         s_chi = sum(chi)
         if s_chi == 0.0:
@@ -115,6 +124,7 @@ def load_from_json(path):
     nbins = int(cfg.get("nbins", 1000))
     file_out = str(cfg.get("file", f"mg{NG:02d}xsecs"))
 
+    # Hand back both the normalized data object and the requested output stem.
     mg = MGData(
         zaid=zaid,
         za=za,

@@ -62,7 +62,7 @@ Depending on the workflow, the package writes some combination of:
 - simple multigroup ACE tables
 - `xsdir_mcnp6.3`
 - summary text files such as `<base>.summary.txt`
-- OpenMC-compatible multigroup HDF5 libraries (`mgxs.h5`)
+- OpenSn-compatible multigroup HDF5 libraries (`mgxs.h5`)
 - Gmsh meshes (`geom.msh`)
 
 For OpenSn-related usage, the repository currently prepares solver-facing inputs such as `mgxs.h5` and `geom.msh`, but it does **not** yet generate a standalone OpenSn text input deck.
@@ -159,7 +159,7 @@ Optional fields include `sig1`, `is_micro`, `atom_density`, `comment`, `tmp`, `n
 
 ### 2. ACE to `mgxs.h5`
 
-Convert an ACE table into an OpenMC-compatible multigroup HDF5 library.
+Convert an ACE table into an OpenSn-compatible multigroup HDF5 library.
 
 ```bash
 python -m multi_group_ace.cli --ace "examples/mg08/99902.02m" --h5 "examples/mg08_out/mgxs.h5" --library-name 99902.02m
@@ -191,7 +191,7 @@ python -m multi_group_ace.cli --verification-root examples --outdir build/verifi
 When mesh generation is enabled, the code follows this order:
 
 1. If a problem directory contains a `.geo`, `.step`, or `.stp` file, the Gmsh executable is called directly on that geometry.
-2. Otherwise, the package searches for an MCNP input file such as `.inp`, `.i`, or `.mcnp` and parses supported surface cards.
+2. Otherwise, the package searches for an MCNP input file such as `.inp`, `.i`, or `.txt` and parses supported surface cards.
 
 Supported MCNP surface types include:
 
@@ -203,7 +203,7 @@ The generated mesh is written as `geom.msh`. Boundary surfaces may also be tagge
 
 ## HDF5 Output Format
 
-The HDF5 writer creates an OpenMC-compatible MGXS structure. At a high level:
+The HDF5 writer creates an OpenSn-compatible MGXS structure. At a high level:
 
 ```text
 /

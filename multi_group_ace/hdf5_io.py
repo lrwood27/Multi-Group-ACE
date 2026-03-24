@@ -43,6 +43,8 @@ def _write_nuclide_group(root, name, mg, temp_group_name, kT_eV):
     order = _scatter_order(mg)
     representation = "isotropic" if order == 0 else "angle"
 
+    # Each material/nuclide gets its own group under the file root. The
+    # temperature-specific data then live inside a "<TTT>K" subgroup.
     g_lib = root.create_group(name)
     g_lib.attrs["atomic_weight_ratio"] = mg.awr
     g_lib.attrs["fissionable"] = bool(fissionable)
@@ -63,6 +65,7 @@ def _write_nuclide_group(root, name, mg, temp_group_name, kT_eV):
         g_T.create_dataset("chi", data=mg.chi)
         g_T.create_dataset("nu-fission", data=[nu * f for nu, f in zip(mg.nu, mg.sigf)])
 
+    # OpenMC/OpenSn-style scatter data are stored in a dedicated subgroup.
     g_scat = g_T.create_group("scatter_data")
     g_scat.create_dataset("g_min", data=[1] * mg.NG)
     g_scat.create_dataset("g_max", data=[mg.NG] * mg.NG)
@@ -77,9 +80,12 @@ def write_mgxs_hdf5_isotropic(mg, h5_path, library_name=None):
         raise SystemExit("h5py is required. Install with: pip install h5py") from exc
 
     temp_group_name, kT_eV = _temp_group_name(mg.tmp)
+    # The HDF5 schema expects the group structure in ascending eV, while the
+    # package stores energies internally as descending MeV boundaries.
     e_asc_eV = [e * MEV_TO_EV for e in reversed(mg.erg)]
 
     with h5py.File(h5_path, "w") as f:
+        # Root attributes describe the library as a whole.
         _set_fixed_ascii_attr(f.attrs, "filetype", "mgxs")
         f.attrs["version"] = [1, 0]
         f.attrs["energy_groups"] = mg.NG
@@ -105,6 +111,8 @@ def write_problem_mgxs_library(mg_list, h5_path):
         if len(mg.erg) != len(ref.erg):
             raise ValueError("Energy grids differ between ACE files.")
 
+    # All materials in one problem library must share the same global energy
+    # grid so a single mesh can reference them consistently.
     temp_group_name, kT_eV = _temp_group_name(ref.tmp)
     e_asc_eV = [e * MEV_TO_EV for e in reversed(ref.erg)]
 

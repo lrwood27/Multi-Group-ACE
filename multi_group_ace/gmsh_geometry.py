@@ -1,6 +1,11 @@
 import os
 import subprocess
 
+# Geometry creation follows two paths:
+#   1) use an explicit .geo/.step file if one exists
+#   2) otherwise, parse a limited subset of MCNP surface cards and build a
+#      simple equivalent geometry through the Gmsh Python API
+
 
 def _normalize_text_file_to_lf(path):
     # OpenSn expects Unix newlines in text mesh files.
@@ -55,6 +60,8 @@ def _detect_geometry_kind_from_name(path):
 
 
 def _parse_mcnp_surfaces(mcnp_input):
+    # Extract just enough structured geometry information from the MCNP input
+    # to build simple slab/sphere/cylinder meshes.
     px_list = []
     py_list = []
     pz_list = []
@@ -439,6 +446,8 @@ def mcnp_to_gmsh_mesh(mcnp_input, mesh_out="geom.msh"):
     gmsh.initialize()
     gmsh.model.add("mcnp_geometry")
 
+    # Pick a geometry builder based on what the MCNP parser found (or what
+    # the filename suffix hints the problem type should be).
     if sph_list:
         regions = _build_sphere_regions(gmsh, sph_list)
     elif cyl_list:
@@ -510,6 +519,8 @@ def make_mesh_for_problem(src_problem_dir, out_problem_dir, gmsh_exe="gmsh", msh
         return
 
     # 2) Fallback: MCNP input -> Gmsh via Python API.
+    # This route is more limited, but it lets the repo generate a usable mesh
+    # even when only the MCNP input deck is available.
     mcnp_candidates = [
         f for f in os.listdir(src_problem_dir)
         if f.lower().endswith((".i", ".inp", ".mcnp"))

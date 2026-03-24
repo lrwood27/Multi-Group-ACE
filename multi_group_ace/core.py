@@ -1,9 +1,13 @@
+# Shared unit-conversion constants used when moving between ACE kT,
+# Kelvin, and HDF5/OpenMC-style energy units.
 KB_EV_PER_K = 8.617333262e-5
 MEV_TO_EV = 1.0e6
 
 
 class MGData:
     # Plain container for multigroup data.
+    # This is the central handoff object for the package: loaders fill it,
+    # converters/readers transform it, and writers export it.
     # sigs/sig1 store NGxNG matrices in row-major order with:
     # row = destination group, column = source group.
     # Example for NG=2: [1->1, 2->1, 1->2, 2->2]
@@ -27,6 +31,8 @@ class MGData:
         comment_short="",
         date="",
     ):
+        # Intentionally store values without extra validation here; the
+        # loaders/readers are responsible for checking external input.
         self.zaid = zaid
         self.za = za
         self.awr = awr
