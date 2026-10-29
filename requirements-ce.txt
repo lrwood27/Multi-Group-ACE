@@ -1,0 +1,3 @@
+# Optional continuous-energy conversion dependency, pinned for reproducibility.
+# This installs OpenMC's Python API; its transport executable is not required.
+openmc @ git+https://github.com/openmc-dev/openmc.git@v0.16.0

@@ -47,11 +47,11 @@
 \vspace*{2cm}
 {\Huge\bfseries Multi-Group-ACE\\[0.4cm]Technical Documentation\par}
 \vspace{1.25cm}
-{\Large Multigroup ACE, MGXS HDF5, and Mesh Preparation Utilities\par}
+{\Large Multigroup Utilities and Continuous-Energy ACE Conversion for OpenMC\par}
 \vfill
 \begin{minipage}{0.85\textwidth}
 \centering
-This document describes the code, example assets, and practical command-line workflows in the Multi-Group-ACE repository. It is intended as compact technical reference material for users working with multigroup cross sections, MCNP-style inputs, Gmsh meshes, and OpenSn or OpenMC compatible MGXS libraries.
+This document describes the code, example assets, and practical command-line workflows in the Multi-Group-ACE repository. It is intended as a compact technical reference for multigroup cross sections, MCNP-style inputs, Gmsh meshes, and conversion of existing continuous-energy neutron ACE evaluations into OpenMC HDF5 libraries. The bundled multigroup tables cannot recover continuous-energy detail.
 \end{minipage}
 \vfill
 {\large \today\par}
@@ -74,7 +74,7 @@ The repository is organized around a reusable Python package, a set of verificat
 \textbf{Path} & \textbf{Role} \\
 \midrule
 \endhead
-\texttt{multi\_group\_ace/} & Primary package implementation. It contains the multigroup data model, JSON ingestion, ACE construction, ACE I/O, HDF5 MGXS output, MCNP-to-Gmsh mesh generation, and the main command-line driver. \\
+\texttt{multi\_group\_ace/} & Primary package implementation. It contains the multigroup data model, JSON ingestion, ACE construction and I/O, MGXS output, continuous-energy neutron conversion through OpenMC, MCNP-to-Gmsh mesh generation, and the command-line driver. \\
 \texttt{examples/} & Verification-style case directories. Each \texttt{mgXX} directory contains source inputs such as MCNP decks, descriptions, and ACE tables; matching \texttt{mgXX\_out} directories contain generated assets such as \texttt{mgxs.h5}, \texttt{geom.msh}, and in one case an OpenSn execution driver. \\
 \texttt{json examples/} & Sample JSON configuration files for the JSON to ACE workflow. These are useful as input templates for new multigroup material definitions. \\
 \texttt{doc/} & Project documentation assets. This directory includes a PDF reference document and can also store generated technical documentation such as the present \texttt{.tex} file. \\
@@ -90,7 +90,7 @@ The primary user-facing interfaces are \texttt{python -m multi\_group\_ace.cli} 
 These two files define the package surface and the central data container used everywhere else in the repository. \texttt{core.py} provides the \texttt{MGData} class and physical constants for temperature conversion, while \texttt{\_\_init\_\_.py} re-exports the package entry points so downstream code can import from \texttt{multi\_group\_ace} directly instead of reaching into each module. In practice, they establish the common vocabulary of the codebase: every loader, converter, writer, and mesh generator either creates, consumes, or returns objects that are standardized here.
 
 \subsection*{Inputs and Outputs}
-The main input to this logical module is a set of multigroup data values used to construct an \texttt{MGData} instance: material identifier, group structure, reaction cross sections, scattering matrices, temperature, and metadata. The main output is an in-memory object with a consistent layout, including the internal scattering convention of row equals destination group and column equals source group, plus a package namespace that exposes the loader, ACE builder, ACE I/O, HDF5 writer, and mesh-generation functions. If no anisotropic scattering moments are supplied, \texttt{MGData} automatically fills \texttt{sig1} with zeros so downstream code can always assume the field exists.
+The main input to this logical module is a set of multigroup data values used to construct an \texttt{MGData} instance: material identifier, group structure, reaction cross sections, scattering matrices, temperature, and metadata. The main output is an in-memory object with a consistent layout, including the internal scattering convention of row equals destination group and column equals source group, plus a package namespace that exposes the loader, ACE builder, ACE I/O, HDF5 writer, continuous-energy conversion function, and mesh-generation functions. Continuous-energy conversion uses OpenMC objects directly rather than passing through the multigroup-only MGData container. If no anisotropic scattering moments are supplied, \texttt{MGData} automatically fills \texttt{sig1} with zeros so downstream code can always assume the field exists.
 
 \subsection*{Key Dependencies}
 \begin{itemize}
@@ -136,7 +136,7 @@ The input is a JSON file containing fields such as \texttt{zaid}, \texttt{NG}, \
 \subsection*{Parsing and Validation Flow}
 The loader begins by reading the entire JSON file into a Python dictionary and immediately checking for the required keys. It then extracts the ZA portion from \texttt{zaid}, converts the energy grid to floating point values, and passes the grid through a helper that reverses it if necessary and rejects any non-strict ordering. Scalar vectors such as \texttt{sigt}, \texttt{sigc}, and \texttt{sigf} are expanded to exactly \texttt{NG} entries, while scattering data can be supplied either as a flat array or as an \texttt{NG x NG} nested list.
 
-If \texttt{is\_micro} is true, the loader multiplies the supplied microscopic cross sections by \texttt{atom\_density} before creating \texttt{MGData}. If fission is absent, it explicitly zeros out \texttt{sigf}, \texttt{nu}, and \texttt{chi}; if fission is present but \texttt{chi} is not normalized, it normalizes the spectrum so the HDF5 and ACE writers later receive a consistent source vector. The loader also interprets \texttt{tmp > 1.0} as a temperature-like quantity that should be converted into ACE-style \texttt{kT} in MeV.
+For microscopic inputs, the loader multiplies the cross sections by atom density before creating \texttt{MGData}. Non-fissionable data have zero \texttt{sigf}, \texttt{nu}, and \texttt{chi}; fissionable data have a normalized spectrum. The ACE and HDF5 writers therefore receive a consistent source vector. Values of \texttt{tmp > 1.0} are treated as Kelvin and converted to ACE-style \texttt{kT} in MeV.
 
 \subsection*{Command-Line Usage}
 \begin{lstlisting}[language=bash]
@@ -231,7 +231,7 @@ At the root of the file, the writer creates a small set of attributes that descr
     attrs:
       atomic_weight_ratio = AWR
       fissionable = true/false
-      representation = "isotropic" or "angle"
+      representation = "isotropic"
       scatter_format = "legendre"
       scatter_shape = "[G][G'][Order]"
       order = 0 or 1
@@ -255,14 +255,47 @@ At the root of the file, the writer creates a small set of attributes that descr
 \subsection*{How the Data Are Mapped into That Structure}
 The temperature group name is created by converting ACE-style \texttt{kT} in MeV into eV and then into Kelvin using the Boltzmann constant from \texttt{core.py}. For a room-temperature table, this typically produces a group named \texttt{294K}. The writer also computes \texttt{absorption} as \texttt{sigc + sigf}, which matches the way transport codes often expect absorptive loss to be reported independently from scattering.
 
-Scattering is where most of the format conversion occurs. The helper \texttt{\_scatter\_order()} examines \texttt{mg.sig1}; if every P1 term is zero, the file is written as order 0 with \texttt{representation = "isotropic"}. If any P1 term is nonzero, the file is written as order 1 with \texttt{representation = "angle"}. The helper \texttt{\_scatter\_matrix\_openmc\_order()} then flattens the internal destination-by-source matrix into the ordering expected by the HDF5 schema: incoming group outer loop, outgoing group inner loop, and, for anisotropic data, P0 followed by P1 for each pair. The datasets \texttt{g\_min} and \texttt{g\_max} are filled densely, which indicates that each incoming group potentially scatters across the full group range represented by the stored matrix.
+Scattering is where most of the format conversion occurs. The helper \texttt{\_scatter\_order()} examines \texttt{mg.sig1}; if every P1 term is zero, the file is written as order 0 with \texttt{representation = "isotropic"}. If any P1 term is nonzero, the file is written as order 1, while \texttt{representation = "isotropic"} remains unchanged because it describes dependence on the incoming direction, independently of scattering anisotropy. P1 recovery from ACE angular bins is approximate and higher angular moments are not preserved. The helper \texttt{\_scatter\_matrix\_openmc\_order()} then flattens the internal destination-by-source matrix into the ordering expected by the HDF5 schema: incoming group outer loop, outgoing group inner loop, and, for anisotropic data, P0 followed by P1 for each pair. The datasets \texttt{g\_min} and \texttt{g\_max} are filled densely, which indicates that each incoming group potentially scatters across the full group range represented by the stored matrix.
 
-When writing a combined problem library, \texttt{write\_problem\_mgxs\_library()} first checks that every material shares the same group count and the same energy grid. It then writes one nuclide group per \texttt{MGData} object beneath the same root. This makes the resulting \texttt{mgxs.h5} file suitable for problems in which a single mesh uses multiple material datasets.
+When writing a combined problem library, \texttt{write\_problem\_mgxs\_library()} first checks that every material shares the same group count and the same energy grid. It validates energy-boundary values and unique table names before opening the output, retains each material's individual temperature, and then writes one nuclide group per \texttt{MGData} object beneath the same root. Zero kT is labeled \texttt{0K}. This makes the resulting \texttt{mgxs.h5} file suitable for problems in which a single mesh uses multiple material datasets.
 
 \subsection*{Command-Line Usage}
 \begin{lstlisting}[language=bash]
 python -m multi_group_ace.cli --ace ace/problem.ace --h5 out/problem_mgxs.h5 --library-name 99902.02m
 \end{lstlisting}
+
+\section{\texttt{multi\_group\_ace/continuous\_energy.py}}
+
+\subsection*{Purpose and Public API}
+This module converts existing continuous-energy neutron ACE libraries into the native neutron HDF5 format used by OpenMC. It imports OpenMC only when conversion is requested, so the multigroup and geometry workflows do not require the OpenMC dependency. The public function is re-exported from the package root:
+
+\begin{lstlisting}[language=Python]
+convert_ace_to_openmc_hdf5(
+    ace_files, output_dir, *, h5_path=None,
+    metastable_scheme="mcnp", overwrite=False
+)
+\end{lstlisting}
+
+The function returns absolute paths for the HDF5 files and their XML catalog. OpenMC's Python API is required; its transport executable is not.
+
+\subsection*{Input Detection and Conversion}
+The CLI detects ACE table types from file contents rather than filesystem extensions. Legacy ASCII multigroup tables whose names end in \texttt{m} remain on the MGXS path. Continuous-energy neutron table names end in \texttt{c}, including names ending in \texttt{nc}; OpenMC's ACE reader handles its supported ASCII header generations and binary format. Every table in every supplied neutron ACE library is enumerated, not just the first table. Thermal scattering, other particle types, and mixed multigroup/continuous-energy inputs are rejected.
+
+Each neutron table is loaded using \texttt{IncidentNeutron.from\_ace()}. Compatible temperatures are combined with OpenMC's temperature-merge API, producing one GNDS-named file per nuclide. Inputs merged for a nuclide must originate from the same evaluation. Duplicate rounded temperature labels and incompatible reaction sets or atomic weight ratios are errors; the converter does not silently discard temperatures or reactions. The ZAID metastable convention defaults to \texttt{mcnp}, with \texttt{nndc} also available.
+
+\subsection*{Output Format and Catalog}
+OpenMC serializes each nuclide using \texttt{export\_to\_hdf5()}. The root \texttt{filetype} is \texttt{data\_neutron}, distinct from the multigroup \texttt{mgxs} format. The file contains nuclide metadata, \texttt{kTs}, continuous-energy grids, reactions, available fission and distribution data, and other supported neutron data carried by the source ACE evaluation. No energy-group collapsing or reconstruction from multigroup values occurs.
+
+The converter registers each generated file in an OpenMC \texttt{DataLibrary}. It writes an XML catalog with resolvable final paths, named \path{cross_sections.xml}. The catalog lists the current invocation's outputs only. Existing destinations require \texttt{--overwrite}; replacement does not merge an older catalog's entries.
+
+\subsection*{Command-Line Usage}
+\begin{lstlisting}[language=bash]
+python -m multi_group_ace.cli --ace He3.ace U235.ace --outdir openmc_data
+python -m multi_group_ace.cli --ace U235_294K.ace U235_600K.ace --outdir openmc_data --metastable-scheme mcnp
+python -m multi_group_ace.cli --ace U235.ace --h5 openmc_data/U235.h5
+\end{lstlisting}
+
+The default output directory is \texttt{h5\_out}. A custom \texttt{--h5} path must end in \texttt{.h5}, must produce exactly one nuclide, and cannot be combined with an explicit \texttt{--outdir}. The XML catalog is placed beside that HDF5 file. \texttt{--library-name} is multigroup-only because OpenMC determines continuous-energy nuclide names. Point OpenMC's \texttt{OPENMC\_CROSS\_SECTIONS} setting at the generated XML when using the converted library.
 
 \section{\texttt{multi\_group\_ace/gmsh\_geometry.py}}
 
@@ -293,6 +326,8 @@ The parser therefore does not build a general constructive solid geometry model 
 \subsection*{How Those Objects Become a Gmsh Mesh}
 After parsing, \texttt{mcnp\_to\_gmsh\_mesh()} decides which builder to use. If spheres are present, it creates nested Gmsh spheres and subtracts each inner sphere from the next outer sphere to form shells. If cylinders are present, it creates one or more cylinders and similarly subtracts nested radii to form cylindrical shells or rings. If plane surfaces are present, it sorts unique cut locations and creates adjacent boxes between consecutive cuts; when multiple slab regions exist, it uses Gmsh fragmentation so the internal interfaces are conformal rather than duplicated coincident faces.
 
+The fallback does not translate general MCNP cell Boolean expressions, material assignments, transformations, or boundary conditions. Sphere and cylinder builders assume concentric regions; slab transverse extents and infinite-domain proxies need review before a solver run. Mesh readability alone does not establish transport equivalence.
+
 The filename suffixes \texttt{-IN}, \texttt{-SL}, \texttt{-CY}, \texttt{-SP}, and \texttt{-ISLC} are used only as hints. They help the code choose a fallback geometric interpretation when the parsed primitive lists are sparse or ambiguous, but they do not replace parsing. Once regions have been created, each 3D volume is assigned a physical group name such as \texttt{region\_1}, \texttt{region\_2}, and so on. The helper \texttt{\_tag\_axis\_aligned\_boundary\_surfaces()} then scans the mesh boundary surfaces, computes bounding boxes, and tags outer faces as \texttt{xmin}, \texttt{xmax}, \texttt{ymin}, \texttt{ymax}, \texttt{zmin}, or \texttt{zmax} when they are axis-aligned.
 
 Finally, Gmsh generates a three-dimensional mesh and writes it to disk. After writing, the file is normalized to Unix line endings because OpenSn expects text mesh files with \texttt{LF} newlines. When \texttt{make\_mesh\_for\_problem()} finds a \texttt{.geo} or \texttt{.step} file instead of relying on MCNP parsing, it bypasses the Python geometry builders entirely and invokes the Gmsh executable directly on that source file.
@@ -305,10 +340,10 @@ python -c 'from multi_group_ace.gmsh_geometry import make_mesh_for_problem; make
 \section{\texttt{multi\_group\_ace/cli.py}}
 
 \subsection*{Purpose}
-This module is the main command-line entry point for the package. It exposes three user-facing workflows: JSON to ACE generation, ACE to HDF5 conversion, and recursive directory scanning that builds one \texttt{mgxs.h5} file per problem directory while optionally generating a companion mesh.
+This module is the maintained command-line entry point. Its three high-level modes are JSON to multigroup ACE generation, ACE conversion with automatic multigroup/continuous-energy routing, and recursive multigroup directory scanning with optional mesh generation. The historical script entry point delegates to this same CLI.
 
 \subsection*{Inputs and Outputs}
-The CLI accepts \texttt{--config} for JSON-driven ACE generation, \texttt{--ace} and \texttt{--h5} for single-file HDF5 conversion, or \texttt{--verification-root} and \texttt{--outdir} for recursive batch processing. Depending on the mode, it produces ACE tables, \texttt{xsdir} and summary text files, one or more \texttt{mgxs.h5} libraries, and optional \texttt{geom.msh} meshes.
+The CLI accepts \texttt{--config} for JSON-driven ACE generation, \texttt{--ace FILE [FILE ...]} for ACE conversion, or \texttt{--verification-root} for recursive multigroup processing. Outputs are multigroup ACE and helper files, MGXS libraries, continuous-energy nuclide HDF5 files with \texttt{cross\_sections.xml}, and optional meshes, according to the selected workflow.
 
 \subsection*{Key Dependencies}
 \begin{itemize}
@@ -322,9 +357,9 @@ The CLI accepts \texttt{--config} for JSON-driven ACE generation, \texttt{--ace}
 \end{itemize}
 
 \subsection*{Dispatch Logic}
-The CLI uses mutually exclusive high-level modes selected by which arguments are present. If \texttt{--verification-root} is supplied, it walks the directory tree, tries to interpret every file as an ACE table, groups successful reads by output problem directory, and writes one combined \texttt{mgxs.h5} per problem. If \texttt{--ace} is supplied, it performs a single ACE-to-HDF5 conversion. If neither of those is present, it expects \texttt{--config} and runs the JSON-to-ACE workflow, including summary and \texttt{xsdir} generation.
+The CLI uses mutually exclusive high-level modes selected by which arguments are present. If \texttt{--verification-root} is supplied, it walks the directory tree, tries to interpret every file as an ACE table, groups successful reads by output problem directory, and writes one combined \texttt{mgxs.h5} per problem. If \texttt{--ace} is supplied, content detection routes a single multigroup table to the MGXS writer or one or more continuous-energy neutron libraries to the OpenMC converter. Multiple multigroup inputs must use the verification scan instead. If neither of those is present, it expects \texttt{--config} and runs the JSON-to-ACE workflow, including summary and \texttt{xsdir} generation.
 
-The batch mode is particularly important because it is where the repository turns many individual ACE files into a problem-oriented asset layout. Instead of writing one HDF5 file per ACE file, it aggregates all ACE tables discovered under the same source problem directory and emits a single library containing one HDF5 group per material. That grouping matches the way a transport problem will later assign multiple materials to one mesh.
+The multigroup batch mode is particularly important because it is where the repository turns many individual ACE files into a problem-oriented asset layout. Instead of writing one HDF5 file per ACE file, it aggregates all ACE tables discovered under the same source problem directory and emits a single library containing one HDF5 group per material. That grouping matches the way a transport problem will later assign multiple materials to one mesh.
 
 \subsection*{Command-Line Usage}
 \begin{lstlisting}[language=bash]
@@ -402,5 +437,29 @@ python -m multi_group_ace.cli --ace examples/mg08/99902.02m --h5 examples/mg08_o
 python -c 'from multi_group_ace.gmsh_geometry import make_mesh_for_problem; make_mesh_for_problem("examples/mg08", "examples/mg08_out", gmsh_exe="gmsh")'
 python examples/mg08_out/run_keigen.py
 \end{lstlisting}
+
+\subsection*{Workflow 5: Continuous-Energy Neutron ACE to OpenMC Data}
+Existing neutron ACE libraries are converted without passing through \texttt{MGData}. Supply one or more files, then point OpenMC at the generated XML catalog. The source tables must already contain continuous-energy data; the bundled \texttt{*.m} examples cannot be used to reconstruct it.
+
+\begin{lstlisting}[language=bash]
+python -m pip install -r requirements-ce.txt
+python -m multi_group_ace.cli --ace He3.ace U235.ace --outdir openmc_data
+\end{lstlisting}
+
+\section{Dependencies and Verification}
+The multigroup base uses the standard library, with \texttt{h5py} required for MGXS export and Gmsh required for mesh creation. The optional \texttt{requirements-ce.txt} pins OpenMC's Python API to version 0.16.0 from its official Git source tag. Installation requires Python 3.12 or newer, Git, and network access; verification used Python 3.13.15. Conversion does not require a transport executable. \texttt{pyopensn} is needed only for the separate OpenSn example driver.
+
+For isolated verification on Windows:
+\begin{lstlisting}[language=bash]
+python -m venv --system-site-packages .venv-ce
+.venv-ce\Scripts\python -m pip install -r requirements-ce.txt
+.venv-ce\Scripts\python tests/fetch_ce_data.py
+$env:MULTI_GROUP_ACE_REQUIRE_CE_TESTS = "1"
+.venv-ce\Scripts\python -m unittest discover -s tests -v
+\end{lstlisting}
+
+The complete required-CE verification run passed 51 tests with zero skips or failures: 24 original workflow checks, 14 continuous-energy unit checks, and 13 real OpenMC integration checks. The original checks cover all 15 bundled multigroup ACE tables, 13 HDF5 libraries and meshes, neutron balance, five infinite-medium analytical benchmarks, angular bins, and malformed inputs. Continuous-energy integration compares converted files with direct ACE loading, including nuclide identities, temperatures, energy grids, persisted reactions, and available fission/distribution data. Generated HDF5 files and XML catalogs are reopened through OpenMC. Multiple files, concatenated tables, binary ACE, and temperature merging are exercised; modified-temperature copies are explicitly synthetic plumbing tests. The required-CE environment setting makes missing prerequisites an error.
+
+Authentic He3 and U235 ENDF/B-VII.1 fixtures are fetched from the primary NJOY ACEtk repository at pinned commit \texttt{aac9e996d5f6c7f5d0729058c0db91cd2f05109e}, with recorded checksums and provenance. They remain in ignored test-data storage. Optional checks skip when their dependencies or data are absent; a complete release verification run must have no skips. The repository audit records measured results. No OpenMC/OpenSn transport simulation or finite-geometry benchmark agreement is claimed.
 
 \end{document}

@@ -6,8 +6,9 @@ from .converter import build_ace
 from .ace_io import read_mg_ace, write_ace
 from .hdf5_io import write_mgxs_hdf5_isotropic
 from .gmsh_geometry import mcnp_to_gmsh_mesh, make_mesh_for_problem
+from .continuous_energy import convert_ace_to_openmc_hdf5
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Limit wildcard imports to the intended public surface.
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "write_mgxs_hdf5_isotropic",
     "mcnp_to_gmsh_mesh",
     "make_mesh_for_problem",
+    "convert_ace_to_openmc_hdf5",
 ]

@@ -1,7 +1,9 @@
 # Copilot Instructions for Multi-Group-ACE
 
 ## Project Overview
-**Multi-Group-ACE** is a Python tool for processing multigroup nuclear cross-section data in ACE (A Compact ENDF) format. Currently a single monolithic file (`simple_ace_mg_full.py`); goal is to refactor into modular, understandable components per research meeting direction.
+**Multi-Group-ACE** is a modular Python package for multigroup workflows and conversion of existing continuous-energy neutron ACE libraries into OpenMC HDF5. The maintained entry point is `python -m multi_group_ace.cli`; executing the historical `simple_ace_mg_full.py` delegates to the same CLI. Its old helper definitions remain archival.
+
+The code snippets below are multigroup teaching sketches from the original refactor, not complete current implementations to paste into the package. The source modules, README, and technical reference define the current interfaces. Continuous-energy conversion uses OpenMC objects directly and does not pass through `MGData`.
 
 ## Research Meeting 1 Requirements
 
@@ -18,7 +20,7 @@
 - ✅ **`if __name__ == "__main__"`** entry point
 - ✅ **`__init__.py`** with module exports
 
-## Target Architecture (8 Files)
+## Current Architecture (9 Modules)
 
 ```
 multi_group_ace/
@@ -29,6 +31,7 @@ multi_group_ace/
 ├── converter.py                # build_ace() - ACE table generation
 ├── ace_io.py                   # read_mg_ace(), write_ace()
 ├── hdf5_io.py                  # write_mgxs_hdf5_isotropic()
+├── continuous_energy.py        # OpenMC neutron ACE -> HDF5 + XML
 └── gmsh_geometry.py            # MCNP geometry → Gmsh mesh
 ```
 
@@ -63,7 +66,7 @@ class MGData:
         self.sig1 = sig1 or []  # P1 anisotropic (optional, often empty)
 ```
 
-**Explain to Professor**: "This is the central data structure. All workflows (JSON→ACE, ACE→HDF5) convert to/from MGData. It holds multigroup cross-sections in a standard format."
+**Explain to Professor**: "MGData is the shared container for multigroup JSON, ACE, and MGXS workflows. Continuous-energy ACE conversion instead uses OpenMC IncidentNeutron objects to retain its energy grids and reaction data."
 
 ---
 
@@ -241,7 +244,7 @@ def write_ace(nxs, jxs, xss, output_file):
 
 ---
 
-### 5. `hdf5_io.py` — OpenMC Library Output
+### 5. `hdf5_io.py` — Multigroup MGXS Output
 **Purpose**: Write mgxs.h5 files compatible with OpenMC  
 **Size**: ~100 lines  
 **Key Concepts**:
@@ -293,11 +296,41 @@ def write_mgxs_hdf5_isotropic(mg, h5_path, library_name=None):
             mat.attrs['temperature_K'] = tmp_k
 ```
 
-**Explain to Professor**: "This module converts MGData into HDF5 format for OpenMC. HDF5 is a standard scientific data format. We create hierarchical groups and datasets (like folders and files) to organize cross-section data. Note the temperature conversion: ACE stores it in MeV, but OpenMC expects eV and Kelvin."
+**Explain to Professor**: "This module writes OpenMC/OpenSn multigroup MGXS from MGData. It reorders scattering arrays and converts ACE kT from MeV to eV and Kelvin labels, retaining each material's temperature. P1 uses order 1 while the incoming-direction representation remains isotropic. Continuous-energy neutron HDF5 uses a separate writer."
 
 ---
 
-### 6. `gmsh_geometry.py` — MCNP → Mesh Conversion
+### 6. `continuous_energy.py` — OpenMC Continuous-Energy Neutron Output
+
+**Purpose**: Convert existing continuous-energy neutron ACE evaluations into native OpenMC HDF5 plus an XML catalog. OpenMC 0.16.0 is optional and loaded only for this workflow.
+
+```text
+Neutron ACE file(s), every table enumerated
+    -> OpenMC IncidentNeutron objects
+    -> compatible temperatures grouped by nuclide
+    -> <GNDS nuclide>.h5 + cross_sections.xml
+```
+
+The converter detects table types from contents and delegates supported ASCII/binary neutron parsing and HDF5 serialization to OpenMC. It does not reconstruct continuous-energy information from multigroup values. The bundled `*.m` examples remain multigroup data; thermal scattering and other particle tables are unsupported.
+
+```python
+from multi_group_ace import convert_ace_to_openmc_hdf5
+
+hdf5_paths, xml_path = convert_ace_to_openmc_hdf5(
+    ["He3.ace", "U235.ace"], "openmc_data",
+    metastable_scheme="mcnp", overwrite=False,
+)
+```
+
+The result contains absolute paths. Each nuclide gets one `filetype=data_neutron` file with compatible temperatures combined without averaging cross sections. Merged temperatures must originate from the same evaluation. Duplicate rounded temperature labels, incompatible reaction sets, and incompatible atomic weight ratios are rejected.
+
+Use `--ace FILE [FILE ...] --outdir openmc_data` for multiple neutron files; the default output directory is `h5_out`. A custom `--h5` requires exactly one resulting nuclide and a `.h5` suffix, cannot be combined with an explicit `--outdir`, and places XML in the output file's parent. `--metastable-scheme` accepts `mcnp` (default) or `nndc`. Existing HDF5/XML destinations require `--overwrite`; the replacement catalog contains only this invocation's outputs. `--library-name` remains multigroup-only.
+
+**Explain to Professor**: "Continuous-energy ACE carries reaction and distribution information absent from MGData. We use OpenMC's data model and exporter, enumerate all source tables, validate temperature merges, and generate the catalog OpenMC uses to locate the neutron files."
+
+---
+
+### 7. `gmsh_geometry.py` — MCNP → Mesh Conversion
 **Purpose**: Parse MCNP geometry cards and generate Gmsh meshes  
 **Size**: ~180 lines  
 **Key Concepts**:
@@ -371,12 +404,12 @@ def mcnp_to_gmsh_mesh(geo_file, output_msh):
 
 ---
 
-### 7. `cli.py` — Command-Line Interface
+### 8. `cli.py` — Command-Line Interface
 **Purpose**: Argument parsing and workflow orchestration  
 **Size**: ~100 lines  
 **Key Concepts**:
 - `argparse` for CLI arguments
-- Three workflows: JSON→ACE, ACE→HDF5, tree scan
+- Three top-level modes route four data workflows: JSON to multigroup ACE, multigroup ACE to MGXS, neutron ACE to continuous-energy HDF5, and multigroup verification scanning
 - `if __name__ == "__main__"` entry point
 
 **What's Inside**:
@@ -431,11 +464,11 @@ if __name__ == "__main__":
     main()
 ```
 
-**Explain to Professor**: "This is the entry point. It uses argparse to handle command-line arguments and routes to the appropriate workflow. The three branches handle JSON→ACE, ACE→HDF5, and bulk tree conversion."
+**Explain to Professor**: "The CLI validates three mutually exclusive modes. ACE mode detects contents and chooses the multigroup or continuous-energy writer. Recursive scanning remains multigroup-only; neutron ACE mode processes multiple files and temperatures. The simplified code sketch above shows only the multigroup branches."
 
 ---
 
-### 8. `__init__.py` — Package Interface
+### 9. `__init__.py` — Package Interface
 **Purpose**: Export public API  
 **Size**: ~10 lines  
 **What's Inside**:
@@ -467,13 +500,31 @@ __all__ = [
 
 ---
 
-## How to Explain This to Your Professor
+## Current Continuous-Energy Verification
+
+Use the optional API in an isolated Windows environment:
+
+```powershell
+python -m venv --system-site-packages .venv-ce
+.venv-ce\Scripts\python -m pip install -r requirements-ce.txt
+.venv-ce\Scripts\python tests/fetch_ce_data.py
+$env:MULTI_GROUP_ACE_REQUIRE_CE_TESTS = "1"
+.venv-ce\Scripts\python -m unittest discover -s tests -v
+```
+
+The pinned OpenMC 0.16.0 API requires Python 3.12 or newer and Git/network access for its source installation; verification used Python 3.13.15. No transport executable is needed. The downloader verifies authentic He3 and U235 ENDF/B-VII.1 fixtures from pinned NJOY ACEtk resources. Downloads, tools, and isolated environments remain ignored. Real integration tests compare outputs with direct OpenMC ACE loading and reopen HDF5/XML catalogs. They also cover binary ACE, concatenated tables, multiple files, and temperature merging. Modified-temperature inputs are explicitly synthetic plumbing tests.
+
+Retain all 24 original multigroup checks. Dependency-light runs may skip optional checks; the complete run before committing must have no skips. Record actual results in `doc/repository_audit.md`. Data-conversion checks do not establish finite-geometry transport benchmark agreement.
+
+The complete verification passed 51 tests with zero skips or failures: 24 original workflow checks, 14 continuous-energy unit checks, and 13 real OpenMC integration checks. The required-CE setting makes missing OpenMC or fixtures an error.
+
+## How to Explain the Current Package
 
 ### 30-Second Version
-*"I refactored the monolithic 1000-line script into 8 focused modules following the research meeting requirements. Each module has a single responsibility: core data structures, JSON loading, physics conversion, file I/O, and meshing. No type hints, no dataclasses—plain Python classes and standard comments. This makes the code understandable line-by-line."*
+*"The maintained package has nine focused modules. It handles multigroup data through MGData and uses OpenMC's Python API for continuous-energy neutron ACE conversion. The two physical representations stay separate while sharing one CLI and repeatable verification."*
 
 ### 2-Minute Version
-*"Here's the data flow: (1) JSON config loads into MGData via `json_loader.py`. (2) `converter.py` builds ACE arrays from MGData—this is the physics core with equiprobable binning. (3) `ace_io.py` reads/writes ACE files to disk. (4) `hdf5_io.py` converts to OpenMC format (temperature in eV, not MeV). (5) For geometry, `gmsh_geometry.py` parses MCNP cards and generates meshes. (6) `cli.py` orchestrates the three workflows with argparse. (7) `core.py` holds constants and the MGData class. (8) `__init__.py` exports the public API. Each file is ~50–180 lines, focused, and understandable."*
+*"The multigroup path loads JSON into MGData, builds or reads ACE arrays, and writes MGXS HDF5. The continuous-energy path reads every neutron ACE table through OpenMC, checks compatible temperatures, and writes one neutron HDF5 file per nuclide plus cross_sections.xml. The mesh module builds limited surface-based geometry, and the CLI routes each request. These conversions do not execute a transport solver or reconstruct information missing from grouped data."*
 
 ### Visual Summary
 ```
@@ -492,7 +543,9 @@ mgxs.h5 (OpenMC format)
 Optional: geometry_file → gmsh_geometry.py → geom.msh
 ```
 
-## Implementation Checklist
+## Historical Refactoring Checklist
+
+These extraction tasks describe the original refactor, which is already present in the maintained package. They remain as teaching context. Use the current verification procedure below after changes.
 
 ### Phase 1: Create Modules (1–2 hours)
 - [ ] Create `multi_group_ace/` directory
@@ -518,5 +571,4 @@ Optional: geometry_file → gmsh_geometry.py → geom.msh
 
 ---
 
-*Last updated: January 28, 2026*
-*Ready for implementation: Phase 1 starting now*
+*Historical refactoring checklist recorded January 28, 2026. Current usage and verification updated October 29, 2026.*

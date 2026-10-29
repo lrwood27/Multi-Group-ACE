@@ -1,4 +1,10 @@
+from bisect import bisect_left
+from math import isfinite
+
+
 def get_equiprob_bins(nbins, N, A):
+    if not isinstance(nbins, int) or nbins <= 0:
+        raise ValueError("nbins must be a positive integer.")
     nx = 1000
     dx = 2.0 / nx
 
@@ -21,19 +27,23 @@ def get_equiprob_bins(nbins, N, A):
         val *= 0.5
         cdf.append(val)
 
+    if not all(isfinite(x) for x in cdf) or any(
+        b < a - 1.0e-12 for a, b in zip(cdf, cdf[1:])
+    ):
+        raise ValueError("Scattering moments imply a negative angular probability density.")
+
     prob = 1.0 / nbins
     mu = [-1.0] * (nbins + 1)
 
-    for k in range(1, nbins + 1):
+    mu[-1] = 1.0
+    for k in range(1, nbins):
         pp = prob * k
-        for j in range(nbins, -1, -1):
-            if cdf[j] < pp:
-                xj = x_vals[j]
-                xj1 = x_vals[j + 1]
-                cj = cdf[j]
-                cj1 = cdf[j + 1]
-                mu[k] = xj + (pp - cj) * (xj1 - xj) / (cj1 - cj)
-                break
+        j = max(1, min(bisect_left(cdf, pp), nx))
+        xj = x_vals[j - 1]
+        xj1 = x_vals[j]
+        cj = cdf[j - 1]
+        cj1 = cdf[j]
+        mu[k] = xj + (pp - cj) * (xj1 - xj) / (cj1 - cj)
 
     return mu
 

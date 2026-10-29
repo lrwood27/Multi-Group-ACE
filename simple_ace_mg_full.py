@@ -1,46 +1,41 @@
 #!/usr/bin/env python3
 
 """
-simple_ace_mg_full.py
+Historical script entry point for the maintained multi_group_ace package.
 
-Python port of LANL's simple_ace_mg.pl, with JSON configuration support,
-plus utilities to:
+Running this file delegates to multi_group_ace.cli. The helper implementations
+below are archived multigroup teaching/reference code; import the package API
+for maintained conversion behavior.
 
-* Read simple multigroup ACE files and write OpenMC-style multigroup HDF5
-  (mgxs.h5) files, suitable for OpenMC/OpenSn. [OpenMC mgxs format, isotropic] [web:1]
-* Scan a verification directory tree (e.g., mg01–mg75) for ACE files and
-  convert them to mgxs.h5 under a parallel output tree.
-* Optionally, for each problem directory, locate a Gmsh-readable geometry
-  file (.geo or .step/.stp) and generate a 3D Gmsh mesh (geom.msh) in the
-  SAME outdir folder as the .h5 cross sections, using only Gmsh on the
-  command line. [web:93][web:122][web:127]
+Supported CLI workflows:
 
-Typical usages:
+* JSON material definitions -> simple multigroup ACE and helper files.
+* One legacy ASCII multigroup ACE table -> OpenMC/OpenSn MGXS HDF5.
+* Continuous-energy neutron ACE file(s) -> GNDS-named OpenMC neutron HDF5
+  files and cross_sections.xml, using the optional OpenMC Python API.
+* Recursive multigroup verification conversion, optionally with Gmsh meshes.
 
-1) JSON → multigroup ACE (original workflow):
+Examples:
 
-   python simple_ace_mg_full.py --config ex3.json
+    python simple_ace_mg_full.py --config "json examples/ex4.json"
+    python simple_ace_mg_full.py --ace examples/mg08/99902.02m --h5 mgxs.h5
+    python simple_ace_mg_full.py --ace He3.ace U235.ace --outdir openmc_data
+    python simple_ace_mg_full.py --verification-root examples --outdir build/verification --make-mesh
 
-2) ACE → HDF5 for a single file:
+ACE routing uses table contents, not filesystem extensions. The bundled
+multigroup data cannot recover continuous-energy detail. Neutron conversion
+processes all tables, merges compatible temperatures from one evaluation,
+and rejects thermal/other particle tables, mixed types, and duplicate rounded
+temperatures. --metastable-scheme defaults to mcnp; nndc is also available.
+--overwrite is required to replace existing continuous-energy HDF5/XML outputs.
+A custom --h5 requires one nuclide, a .h5 suffix, and no explicit --outdir.
 
-   python simple_ace_mg_full.py --ace path\\to\\file --h5 path\\to\\out.h5
+Install the optional pinned OpenMC API with:
 
-3) Verification tree ACE → HDF5 only:
+    python -m pip install -r requirements-ce.txt
 
-   python simple_ace_mg_full.py --verification-root "C:\\path\\to\\problems" ^
-       --outdir "C:\\path\\to\\problems_h5"
-
-4) Verification tree ACE → HDF5 + Gmsh mesh (from .geo or .step):
-
-   python simple_ace_mg_full.py --verification-root "C:\\path\\to\\problems" ^
-       --outdir "C:\\path\\to\\problems_h5" ^
-       --make-mesh --gmsh "gmsh"
-
-Notes:
-
-- MGData.tmp is kT in MeV (as in ACE).
-- For HDF5 mgxs.h5, kT is converted to eV and a corresponding temperature
-  group "<TTT>K" is created, as documented for OpenMC multigroup libraries. [web:1]
+No OpenMC transport executable is required for conversion. See README.md and
+the technical reference for current interfaces and verification limits.
 """
 
 from __future__ import annotations
@@ -1930,4 +1925,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Keep the historic script entry point on the maintained package path.
+    from multi_group_ace.cli import main as package_main
+    package_main()

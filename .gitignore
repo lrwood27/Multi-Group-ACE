@@ -1,1 +1,5 @@
 __pycache__/
+.venv-ce/
+.test-data/
+.tools/
+.build/

@@ -1,4 +1,17 @@
 from .core import MGData
+from math import isfinite
+
+
+def _read_control_array(stream, count, label):
+    values = []
+    while len(values) < count:
+        line = stream.readline()
+        if not line:
+            raise ValueError(f"ACE file ended before all {label} values were read.")
+        values.extend(int(x) for x in line.split())
+    if len(values) != count:
+        raise ValueError(f"Expected {count} {label} values, got {len(values)}.")
+    return [0] + values
 
 
 def _recover_p1_from_equiprob_bins(xss, nxs, jxs, NG, sigs):
@@ -63,21 +76,30 @@ def read_mg_ace(ace_file):
         header1 = f.readline()
         header2 = f.readline()
 
+        parts1 = header1.split()
+        if len(parts1) < 3 or not parts1[0].lower().endswith("m"):
+            raise ValueError(
+                "Expected a legacy ASCII multigroup ACE table (name ending in 'm'). "
+                "Continuous-energy ACE tables are not supported by read_mg_ace; "
+                "use convert_ace_to_openmc_hdf5() or the --ace CLI for neutron data."
+            )
+        zaid = parts1[0]
+        awr = float(parts1[1])
+        tmp_mev = float(parts1[2])
+        date_str = parts1[3] if len(parts1) > 3 else ""
+        if not isfinite(awr) or awr <= 0 or not isfinite(tmp_mev) or tmp_mev < 0:
+            raise ValueError("ACE atomic weight ratio/temperature is invalid.")
+
         for _ in range(4):
             f.readline()
 
         # Read the fixed-size control arrays before reading the XSS payload.
-        nxs_vals = []
-        while len(nxs_vals) < 16:
-            nxs_vals.extend(int(x) for x in f.readline().split())
-        nxs = [0] + nxs_vals[:16]
-
-        jxs_vals = []
-        while len(jxs_vals) < 32:
-            jxs_vals.extend(int(x) for x in f.readline().split())
-        jxs = [0] + jxs_vals[:32]
+        nxs = _read_control_array(f, 16, "NXS")
+        jxs = _read_control_array(f, 32, "JXS")
 
         N = nxs[1]
+        if N <= 0 or nxs[5] <= 0:
+            raise ValueError("ACE XSS length and multigroup count must be positive.")
         xss_vals = []
         while len(xss_vals) < N:
             line = f.readline()
@@ -88,18 +110,28 @@ def read_mg_ace(ace_file):
                 xss_vals.extend(float(x) for x in parts)
         if len(xss_vals) < N:
             raise ValueError("ACE file ended before all XSS values were read.")
+        if len(xss_vals) != N or any(line.strip() for line in f):
+            raise ValueError(
+                "Unexpected trailing data or multiple ACE tables: multigroup "
+                "conversion requires a single table and cannot mix table types."
+            )
         xss = [0.0] + xss_vals[:N]
-
-    parts1 = header1.split()
-    zaid = parts1[0]
-    awr = float(parts1[1])
-    tmp_mev = float(parts1[2])
-    date_str = parts1[3]
+        if not all(isfinite(x) for x in xss):
+            raise ValueError("ACE XSS contains non-finite values.")
 
     comment_short = header2.rstrip("\n")[:70].rstrip()
     comment = comment_short
 
     NG = nxs[5]
+
+    def check_block(start, length, label):
+        if start <= 0 or start + length > len(xss):
+            raise ValueError(f"ACE {label} block points outside the XSS payload.")
+
+    check_block(jxs[1], 2 * NG, "energy")
+    for slot in range(2, 7):
+        check_block(jxs[slot], NG, f"JXS({slot})")
+    check_block(jxs[13], 1, "scatter pointer")
     # Reconstruct the descending group boundaries from ACE midpoint/width data.
     mids = [xss[jxs[1] + k] for k in range(NG)]
     widths = [xss[jxs[1] + NG + k] for k in range(NG)]
@@ -110,6 +142,8 @@ def read_mg_ace(ace_file):
         ehi.append(mids[k] + 0.5 * widths[k])
         elow.append(mids[k] - 0.5 * widths[k])
     erg = [ehi[0]] + elow
+    if erg[-1] < 0 or any(a <= b for a, b in zip(erg, erg[1:])):
+        raise ValueError("ACE energy boundaries must be nonnegative and decreasing.")
 
     sigt = [xss[jxs[2] + k] for k in range(NG)]
     sigf = [xss[jxs[3] + k] for k in range(NG)]
@@ -120,6 +154,9 @@ def read_mg_ace(ace_file):
     # JXS(13) points to a location inside XSS that stores the start of the
     # P0 scatter matrix block.
     p0_start = int(xss[jxs[13]])
+    if p0_start != xss[jxs[13]]:
+        raise ValueError("ACE scatter pointer must be an integer.")
+    check_block(p0_start, NG * NG, "P0 scatter")
     sigs = []
     # Convert ACE scatter layout (row=from, col=to) to internal layout
     # (row=to, col=from).

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 # Geometry creation follows two paths:
@@ -484,9 +485,12 @@ def mcnp_to_gmsh_mesh(mcnp_input, mesh_out="geom.msh"):
 
 
 def make_mesh_for_problem(src_problem_dir, out_problem_dir, gmsh_exe="gmsh", msh_name="geom.msh"):
+    # Gmsh runs with cwd=src_problem_dir, so both paths must be absolute.
+    src_problem_dir = os.path.abspath(src_problem_dir)
+    out_problem_dir = os.path.abspath(out_problem_dir)
     # 1) Prefer explicit Gmsh geometry files.
-    geo_files = [f for f in os.listdir(src_problem_dir) if f.lower().endswith(".geo")]
-    step_files = [f for f in os.listdir(src_problem_dir) if f.lower().endswith(".step") or f.lower().endswith(".stp")]
+    geo_files = sorted(f for f in os.listdir(src_problem_dir) if f.lower().endswith(".geo"))
+    step_files = sorted(f for f in os.listdir(src_problem_dir) if f.lower().endswith((".step", ".stp")))
 
     geom_src = None
     geom_type = None
@@ -506,7 +510,7 @@ def make_mesh_for_problem(src_problem_dir, out_problem_dir, gmsh_exe="gmsh", msh
         print(f" Geometry: Mesh -> {msh_path}")
         try:
             subprocess.check_call(
-                [gmsh_exe, geom_src, "-3", "-o", msh_path],
+                [shutil.which(gmsh_exe) or gmsh_exe, geom_src, "-3", "-o", msh_path],
                 cwd=src_problem_dir,
             )
         except FileNotFoundError:
@@ -521,10 +525,10 @@ def make_mesh_for_problem(src_problem_dir, out_problem_dir, gmsh_exe="gmsh", msh
     # 2) Fallback: MCNP input -> Gmsh via Python API.
     # This route is more limited, but it lets the repo generate a usable mesh
     # even when only the MCNP input deck is available.
-    mcnp_candidates = [
+    mcnp_candidates = sorted(
         f for f in os.listdir(src_problem_dir)
         if f.lower().endswith((".i", ".inp", ".mcnp"))
-    ]
+    )
     if not mcnp_candidates:
         print(
             f" Geometry: no .geo/.step or MCNP input (.i/.inp/.mcnp) found in "

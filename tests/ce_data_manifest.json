@@ -1,0 +1,21 @@
+{
+  "description": "Authentic ENDF/B-VII.1 ACE fixtures from the primary NJOY ACEtk test suite. IAEA FENDL H1/U235 URLs were attempted first but returned a Cloudflare HTTP 403 challenge during verification; He3 and U235 are the documented fallback, not H1.",
+  "source_revision": "aac9e996d5f6c7f5d0729058c0db91cd2f05109e",
+  "source_repository": "https://github.com/njoy/ACEtk",
+  "files": [
+    {
+      "name": "2003.710nc",
+      "nuclide": "He3",
+      "url": "https://raw.githubusercontent.com/njoy/ACEtk/aac9e996d5f6c7f5d0729058c0db91cd2f05109e/test/resources/2003.710nc",
+      "size": 203584,
+      "sha256": "84a1ceedcd1cb2ac3de9c58903b17a571400f2008d417608e0dc71c95064e7f7"
+    },
+    {
+      "name": "92235.710nc",
+      "nuclide": "U235",
+      "url": "https://raw.githubusercontent.com/njoy/ACEtk/aac9e996d5f6c7f5d0729058c0db91cd2f05109e/test/resources/92235.710nc",
+      "size": 16959943,
+      "sha256": "de91aa90aab72effded34b5cf77998ee32743f1e46a7f077e300356c9cd2ce20"
+    }
+  ]
+}
