@@ -1,0 +1,45 @@
+MG01
+
+def guess_dataset_name(h5_path: str) -> str:
+    """Pick the first top-level dataset/group name in the OpenMC mgxs.h5."""
+    with h5py.File(h5_path, "r") as f:
+        keys = list(f.keys())
+    if not keys:
+        raise RuntimeError(f"No top-level datasets found in {h5_path}")
+    return keys[0]
+	
+Make method that prints a list of materials contained in the file
+
+
+
+except TypeError:
+        problem = DiscreteOrdinatesProblem(mesh=grid, num_groups=ng, groupsets=groupsets)
+        problem.SetXSMap(xs_map=xs_map)
+		
+This section is not necessary
+
+
+keff = float(ksolver.GetEigenvalue())
+
+don't need "float()"
+
+
+MG02
+
+
+Typing is not valuable '''    '''
+
+
+
+
+Figure out how to "interogate" the cross section in the OpenSn input
+
+
+
+Try and make all of the inputs bare bones
+
+
+Here are the things are the necessary in an OpenSn input file:
+
+
+Find keff problem description documentation
